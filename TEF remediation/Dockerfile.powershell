@@ -1,0 +1,35 @@
+# DEPRECATED — branch drift reports have been ported to Python and are now
+# served by Dockerfile.python (commit_drift and file_drift report types).
+# This image is no longer needed and can be removed.
+
+FROM debian:bookworm-slim
+
+# Base system tools + prerequisites for pwsh apt repo
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        git \
+        apt-transport-https \
+        ca-certificates \
+        gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# PowerShell 7
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+        | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] \
+        https://packages.microsoft.com/repos/microsoft-debian-bookworm-prod bookworm main" \
+        | tee /etc/apt/sources.list.d/microsoft.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends powershell \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Branch drift scripts — uncomment each COPY line when the script is ready.
+# COPY git_branches_gap/report_branch_discrepancies_by_commit.ps1   scripts/
+# COPY git_branches_gap/report_branch_discrepancies_by_content.ps1  scripts/
+
+COPY entrypoint_ps.sh /app/run-report
+RUN chmod +x /app/run-report
+
+ENTRYPOINT ["/app/run-report"]

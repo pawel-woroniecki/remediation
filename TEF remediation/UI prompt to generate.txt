@@ -2,19 +2,19 @@
 
 > **Context**
 >
-> I have an existing repository with **PowerShell and Python scripts** that generate DevOps and governance reports.  
+> I have an existing repository with **Python scripts** that generate DevOps and governance reports.
 > These scripts:
 >
 > *   Are CLI‑based and already work correctly
 > *   Require input parameters (CLI args + environment variables)
-> *   Produce outputs as CSV / JSON / Markdown files
+> *   Produce outputs as CSV files written to GCS and results written to BigQuery
 > *   Must NOT be rewritten or have business logic changed
 >
 > The reports include:
 >
 > 1.  Commit‑based branch drift
 > 2.  File‑diff‑based branch drift
-> 3.  Environment vs branch drift (Git vs BigQuery / GCS)
+> 3.  Environment vs code drift (Git vs BigQuery / GCS)
 > 4.  Orphan BigQuery datasets (even if source code is missing)
 
 ***
@@ -34,31 +34,40 @@
 
 > **Architecture Constraints (Must Follow)**
 >
-> ✅ Scripts run inside a **Docker container**  
-> ✅ One container image supports **all scripts**  
-> ✅ Scripts are executed as **batch jobs**, not long‑running services  
-> ✅ Parameters are passed as **CLI arguments and environment variables**  
-> ✅ Secrets are stored in a secure secrets manager  
-> ✅ Execution is **stateless**  
-> ✅ Outputs are written to a shared output directory and later stored centrally
+> ✅ Scripts run inside a **Docker container** (Python 3.11 slim)
+> ✅ One container image supports **all scripts**
+> ✅ Scripts are executed as **Google Cloud Run Jobs** (batch, not long-running)
+> ✅ Parameters are passed as **CLI arguments and environment variables**
+> ✅ The GitLab PAT secret is stored in **GCP Secret Manager** and fetched at runtime by the container
+> ✅ Execution is **stateless**
+> ✅ Outputs are written to **GCS** (CSV files) and **BigQuery** (structured results)
+> ✅ `EXECUTION_ID` is **auto-generated** by the container entrypoint (`uuidgen`) — the UI does not need to generate it
 >
-> 🚫 Do NOT embed business logic in the UI  
-> 🚫 Do NOT allow arbitrary shell execution  
-> 🚫 Do NOT hardcode secrets  
-> 🚫 Do NOT modify existing scripts unless strictly necessary
+> 🚫 Do NOT embed business logic in the UI
+> 🚫 Do NOT allow arbitrary shell execution
+> 🚫 Do NOT hardcode secrets
+> 🚫 Do NOT modify existing scripts
 
 ***
 
-> **Recommended Execution Model**
+> **Execution Model**
 >
-> *   Use a **wrapper entrypoint** inside the container, e.g.:
+> *   A wrapper entrypoint inside the container routes by report type:
+>
 >         run-report <report_type> [script arguments]
-> *   Each report type maps to exactly one existing script.
-> *   The UI triggers executions by invoking container jobs with arguments.
 >
-> Example:
+> *   Each report type maps to exactly one existing Python script.
+> *   The UI triggers executions by invoking Cloud Run Jobs with arguments.
+> *   The two GCP projects in use are:
+>     *   `tefde-gcp-fastoss-dev-gke` — Cloud Run Jobs, GCS, Secret Manager
+>     *   `tefde-gcp-fastoss-dev` — BigQuery dataset (`devops_reports`)
 >
->     run-report commit_drift -DateTag 2026-05-11 -OutputDir /workspace/outputs
+> Example Cloud Run Job invocation:
+>
+>     gcloud run jobs execute devops-reports-commit-drift \
+>       --project=tefde-gcp-fastoss-dev-gke \
+>       --region=europe-west3 \
+>       --args="commit_drift,--gcp-project,tefde-gcp-fastoss-dev-gke,--reporting-project,tefde-gcp-fastoss-dev,--gcs-bucket,tefde-gcp-fastoss-dev-gcs-devops-reports"
 
 ***
 
@@ -69,11 +78,11 @@
 > *   Show a **list of available reports**
 > *   Dynamically render a **parameter form** based on the selected report
 > *   Validate required parameters before execution
-> *   Trigger a container job
+> *   Trigger the corresponding Cloud Run Job
 > *   Show:
->     *   Execution ID
+>     *   Execution ID (read from BigQuery `executions` table or Cloud Run Job execution status)
 >     *   Status (running / success / failed)
->     *   Link to outputs (e.g., Cloud Storage)
+>     *   Link to GCS output folder
 >
 > The UI does NOT need advanced styling; clarity and correctness matter more.
 
@@ -86,13 +95,80 @@
 > ```yaml
 > commit_drift:
 >   label: "Commit-based branch drift"
+>   cloud_run_job: "devops-reports-commit-drift"
 >   parameters:
->     DateTag:
+>     gcp_project:
 >       type: string
 >       required: true
->     OutputDir:
+>       default: "tefde-gcp-fastoss-dev-gke"
+>     reporting_project:
 >       type: string
->       default: /workspace/outputs
+>       required: true
+>       default: "tefde-gcp-fastoss-dev"
+>     gcs_bucket:
+>       type: string
+>       required: true
+>       default: "tefde-gcp-fastoss-dev-gcs-devops-reports"
+>     date_tag:
+>       type: string
+>       required: false
+>       default: "<today>"
+>
+> file_drift:
+>   label: "File-content branch drift"
+>   cloud_run_job: "devops-reports-file-drift"
+>   parameters:
+>     gcp_project:
+>       type: string
+>       required: true
+>       default: "tefde-gcp-fastoss-dev-gke"
+>     reporting_project:
+>       type: string
+>       required: true
+>       default: "tefde-gcp-fastoss-dev"
+>     gcs_bucket:
+>       type: string
+>       required: true
+>       default: "tefde-gcp-fastoss-dev-gcs-devops-reports"
+>     compare_mode:
+>       type: enum
+>       options: [merge_base, direct]
+>       default: merge_base
+>
+> env_drift:
+>   label: "Environment vs code drift"
+>   cloud_run_job: "devops-reports-env-drift"
+>   parameters:
+>     gcp_project:
+>       type: string
+>       required: true
+>     reporting_project:
+>       type: string
+>       required: true
+>       default: "tefde-gcp-fastoss-dev"
+>     reports_gcs_bucket:
+>       type: string
+>       required: true
+>       default: "tefde-gcp-fastoss-dev-gcs-devops-reports"
+>
+> orphan_datasets:
+>   label: "Orphan BigQuery datasets"
+>   cloud_run_job: "devops-reports-orphan-datasets"
+>   parameters:
+>     gcp_project:
+>       type: string
+>       required: true
+>     reporting_project:
+>       type: string
+>       required: true
+>       default: "tefde-gcp-fastoss-dev"
+>     gcs_bucket:
+>       type: string
+>       required: true
+>       default: "tefde-gcp-fastoss-dev-gcs-devops-reports"
+>     subgroup:
+>       type: string
+>       default: "ndl_core"
 > ```
 >
 > The UI should use this metadata to generate forms automatically.
@@ -103,7 +179,7 @@
 >
 > *   Backend: lightweight API (Python or Node.js)
 > *   UI: simple web UI (React, Vue, or plain HTML is fine)
-> *   Execution: containerized batch jobs (e.g., Cloud Run Jobs or Kubernetes Jobs)
+> *   Execution: Google Cloud Run Jobs (already provisioned via Terraform)
 > *   Authentication: platform IAM or single sign‑on
 >
 > Use sensible defaults and explain assumptions.
@@ -114,9 +190,9 @@
 >
 > 1.  High‑level architecture diagram (textual description is fine)
 > 2.  Backend API design (endpoints + payloads)
-> 3.  UI behavior and flow
-> 4.  How parameters are passed to the container
-> 5.  How executions are tracked and outputs exposed
+> 3.  UI behaviour and flow
+> 4.  How parameters are passed to the Cloud Run Job
+> 5.  How executions are tracked (BigQuery `executions` table + Cloud Run Job status)
+> 6.  How GCS output links are surfaced to the user
 >
 > Focus on **clean separation of concerns, simplicity, and safety**.
-

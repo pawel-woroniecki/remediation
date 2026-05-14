@@ -1,259 +1,176 @@
-# README.md
+# DevOps Governance & Drift Reporting Framework
 
-```markdown
-# Environment Drift & Governance Reporting
-
-This repository contains a **Cloud‑native drift and governance reporting framework**
-for BigQuery- and GCS-based data products.
-
-It is designed to:
-- Detect **environment drift** between source code and deployed environments
-- Detect **orphan BigQuery datasets** with no source ownership
-- Run in **Docker / Cloud Run Jobs**
-- Be **triggered from a UI**
-- Persist results in **BigQuery for analytics and governance**
+A cloud-native reporting framework that detects drift and governance gaps across Git branches, GCP environments, and BigQuery datasets. All reports run as **Google Cloud Run Jobs**, write results to **BigQuery** and **GCS**, and are visualised in **Looker**.
 
 ---
 
-## What Problems This Solves
+## Reports
 
-This project addresses four governance and reliability use cases:
-
-1. **Environment vs Branch Drift**  
-   Are deployed BigQuery objects and GCS artifacts consistent with source code?
-
-2. **Commit / Branch Drift (environment‑centric)**  
-   Does a specific Git ref diverge from what is deployed?
-
-3. **File‑level Drift Detection**  
-   Are generated artifacts semantically different after normalization?
-
-4. **Orphan BigQuery Datasets** ✅  
-   Which datasets exist in BigQuery **without any source code ownership**, even if source code is lost?
+| # | Report | Script | Cloud Run job name |
+|---|---|---|---|
+| 1 | Commit-based branch drift | `git_branches_gap/report_branch_discrepancies_by_commit.py` | `devops-reports-commit-drift` |
+| 2 | File-content branch drift | `git_branches_gap/report_branch_discrepancies_by_content.py` | `devops-reports-file-drift` |
+| 3 | Environment vs code drift | `git_gcp_code_vs_environment_drift/generate_code_environment_drift_report.py` | `devops-reports-env-drift` |
+| 4 | Orphan BigQuery datasets | `bigquery_orphan_datasets/unmatched_bq_datasets_report.py` | `devops-reports-orphan-datasets` |
 
 ---
 
-## Report Types
-
-### 1️⃣ Environment vs Branch Drift Report
-
-Detects discrepancies between:
-- **Source snapshot** (Git branch or Nexus release)
-- **Runtime environment** (BigQuery + GCS)
-
-Findings include:
-- Missing objects
-- Extra objects
-- Schema mismatches
-- Definition mismatches
-- Artifact content drift
-
----
-
-### 2️⃣ Orphan BigQuery Datasets Report
-
-Detects datasets that:
-- Exist in a BigQuery project
-- Are **not referenced** by any repository via `BQ_DATASET_NAMES`
-- Are evaluated at a specific Git ref (e.g. `production`)
-
-This report works even when:
-- Repositories are missing
-- Code history is incomplete
-- Only CI/CD metadata remains
-
----
-
-## Architecture Overview
+## Architecture
 
 ```
+┌─────────────────────────────────────────────────────────┐
+│  UI / Cloud Scheduler                                   │
+└────────────────────┬────────────────────────────────────┘
+                     │  trigger Cloud Run Job
+                     ▼
+┌─────────────────────────────────────────────────────────┐
+│  Cloud Run Job  (tefde-gcp-fastoss-dev-gke)             │
+│  Docker image ← Artifact Registry                       │
+│                                                         │
+│  entrypoint.sh                                          │
+│    Phase 1: clone_fastoss_b.py  (all repos via GitLab)  │
+│    Phase 2: report script                               │
+└──────┬──────────────────────────────┬───────────────────┘
+       │                              │
+       ▼                              ▼
+┌─────────────┐            ┌──────────────────────────────┐
+│ Secret Mgr  │            │  BigQuery  (tefde-gcp-        │
+│ gitlab-token│            │  fastoss-dev)                 │
+└─────────────┘            │  dataset: devops_reports      │
+                           │  - executions                 │
+       ▼                   │  - branch_drift_kpis          │
+┌─────────────┐            │  - branch_drift_evidence      │
+│  GCS bucket │            │  - env_drift_findings         │
+│  CSV outputs│            │  - orphan_datasets            │
+└─────────────┘            │  - orphan_dataset_objects     │
+                           └──────────────┬────────────────┘
+                                          │
+                                          ▼
+                                    ┌──────────┐
+                                    │  Looker  │
+                                    └──────────┘
+```
 
-┌──────────┐
-│   UI     │
-│ (Portal) │
-└────┬─────┘
-│ Cloud Run Job trigger
-▼
-┌────────────────────────────┐
-│ Cloud Run Job (Docker)     │
-│                            │
-│ - env drift script         │
-│ - orphan dataset script    │
-└────┬───────────────┬───────┘
-│               │
-▼               ▼
-┌──────────────┐  ┌──────────┐
-│ Git / Nexus  │  │ BigQuery │
-│ Source Code  │  │ Runtime  │
-└──────────────┘  └────┬─────┘
-▼
-┌────────────────────┐
-│ devops\_reports BQ  │
-│ - executions       │
-│ - env\_drift\_findings│
-└────────────────────┘
+---
 
+## GCP Projects
+
+| Resource | Project |
+|---|---|
+| Cloud Run Jobs, GCS, Secret Manager, Service Account, Artifact Registry | `tefde-gcp-fastoss-dev-gke` |
+| BigQuery dataset and tables | `tefde-gcp-fastoss-dev` |
+
+---
+
+## Folder Structure
+
+```
+TEF remediation/
+├── Dockerfile.python                        # Single image for all 4 reports
+├── entrypoint.sh                            # Routes report type → script
+├── requirements.txt                         # Python dependencies
+│
+├── clone_all_groups_repo/
+│   ├── clone_fastoss_b.py                   # Clones all repos (reads PAT from Secret Manager)
+│   └── clone_fastoss_b.ps1                  # Local dev use only
+│
+├── git_branches_gap/
+│   ├── report_branch_discrepancies_by_commit.py   # Cloud Run: commit drift
+│   ├── report_branch_discrepancies_by_content.py  # Cloud Run: file drift
+│   └── *.ps1                                      # Local dev scripts
+│
+├── git_gcp_code_vs_environment_drift/
+│   └── generate_code_environment_drift_report.py  # Cloud Run: env drift
+│
+├── bigquery_orphan_datasets/
+│   └── unmatched_bq_datasets_report.py            # Cloud Run: orphan datasets
+│
+├── looker_sql/
+│   ├── commit_drift_report.sql
+│   ├── file_drift_report.sql
+│   ├── env_drift_report.sql
+│   └── orphan_datasets_report.sql
+│
+└── Terraform/
+    ├── BQ variables.tf       # Provider, all variables
+    ├── BQ DS + Tables.tf     # SA, Secret Manager, GCS, BigQuery, IAM
+    ├── Cloud Run Jobs.tf     # 4 Cloud Run Job resources
+    ├── artifact_registry.tf  # Artifact Registry repo + IAM
+    ├── apis.tf               # GCP API enablement (both projects)
+    ├── looker.tf             # Looker read-only SA + BQ IAM
+    └── terraform.tfvars      # Values for all variables
+```
+
+---
+
+## Deployment Steps
+
+### 1. Terraform apply
+
+```bash
+cd "TEF remediation/Terraform"
+terraform init
+terraform apply
+```
+
+### 2. Load the GitLab PAT into Secret Manager
+
+```bash
+gcloud secrets versions add gitlab-token \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --data-file=- <<< "YOUR_GITLAB_PAT"
+```
+
+### 3. Build and push the Docker image
+
+```bash
+docker build -f Dockerfile.python -t \
+  europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:latest .
+
+docker push \
+  europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:latest
+```
+
+### 4. Create the Looker BigQuery key (manual — cannot be done in Terraform)
+
+```bash
+gcloud iam service-accounts keys create looker-bq-reader-key.json \
+  --iam-account=looker-bq-reader@tefde-gcp-fastoss-dev.iam.gserviceaccount.com \
+  --project=tefde-gcp-fastoss-dev
+```
+
+Upload `looker-bq-reader-key.json` to **Looker Admin → Connections → BigQuery**.
+
+### 5. Run a report manually
+
+```bash
+gcloud run jobs execute devops-reports-commit-drift \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --region=europe-west3
 ```
 
 ---
 
 ## BigQuery Reporting Model
 
-All reports write into a **single reporting dataset**:
+All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`.
 
-```
-
-devops\_reports
-
-```
-
-### Tables
-
-#### `executions`
-One row per report execution.
-
-Tracks:
-- execution_id
-- report_type (`env_drift`, `orphan_datasets`)
-- execution_ts
-- environment
-- git_ref
-- source_mode
-- status
+| Table | Purpose |
+|---|---|
+| `executions` | One row per job run — audit trail |
+| `branch_drift_kpis` | Commit/file drift counts per repo × direction |
+| `branch_drift_evidence` | Individual commits/files driving the drift |
+| `env_drift_findings` | Code vs environment discrepancies |
+| `orphan_datasets` | Unowned BigQuery datasets |
+| `orphan_dataset_objects` | Objects inside orphan datasets |
+| `entities` | Reference catalogue |
 
 ---
 
-#### `env_drift_findings`
-One row per detected issue or governance finding.
+## Security
 
-Logical usage:
-
-| component_type       | drift_category     | Meaning                          |
-|---------------------|--------------------|----------------------------------|
-| bigquery            | schema_mismatch…   | BigQuery object drift            |
-| gcs                 | content_mismatch…  | GCS artifact drift               |
-| bigquery_dataset    | orphan_dataset     | Dataset has no source ownership  |
-
-✅ No additional tables are required to add new report types.
-
----
-
-## Scripts
-
-### `git_gcp_code_vs_environment_drift.py`
-
-Primary **environment drift engine**.
-
-Responsibilities:
-- Render source snapshot (Git or Nexus)
-- Build inventories (BigQuery, dbt, Python)
-- Compare against runtime environment
-- Emit drift findings
-
----
-
-### `unmatched_bq_datasets_report.py`
-
-**Orphan BigQuery Datasets** governance report.
-
-Responsibilities:
-- List datasets in BigQuery
-- Scan multiple repositories
-- Read `.gitlab-ci.yml` at a Git ref
-- Extract `BQ_DATASET_NAMES`
-- Detect datasets with no source ownership
-
----
-
-## Execution Model
-
-All scripts:
-- Run as **Docker containers**
-- Are executed via **Cloud Run Jobs**
-- Require a UI‑provided `EXECUTION_ID`
-- Write structured results to BigQuery
-
-Execution status:
-- `success` → report completed
-- `failed` → execution aborted (recorded)
-
----
-
-## Docker Image
-
-Common runtime image:
-- Python 3.11 slim
-- git, curl
-- `google-cloud-bigquery`
-
-Authentication:
-- **Workload Identity**
-- No credentials baked into image
-
----
-
-## IAM & Security
-
-### Cloud Run Job Service Account
-
-**Reporting project**:
-- `roles/bigquery.dataEditor`
-- `roles/bigquery.jobUser`
-
-**Runtime project**:
-- `roles/bigquery.metadataViewer`
-- `roles/storage.objectViewer`
-
----
-
-## UI Integration
-
-### Required Environment Variable
-
-```
-
-EXECUTION\_ID
-
-```
-
-### Typical UI‑to‑Job Arguments
-
-- `--project-id`
-- `--reporting-project`
-- `--workspace-root`
-- `--subgroup`
-- `--git-ref`
-
-The UI treats each execution as an **immutable audit record**.
-
----
-
-## Looker & Analytics
-
-All reporting data is **Looker‑ready**.
-
-Typical dashboards:
-- Environment Drift Overview
-- Orphan Dataset Governance
-- High‑Severity Drift Alerts
-- Trend & Cleanup Progress
-
-Example SQL queries are documented in:
-**Environment Drift Reporting – Updated Technical Documentation**
-
----
-
-## Final Notes
-
-This repository intentionally separates:
-- **Drift detection** (source vs environment)
-- **Governance detection** (ownership gaps)
-
-This keeps the system:
-- Scalable
-- Auditable
-- Easy to extend with new report types
-
----
-
-*End of README.*
+- No credentials baked into the Docker image
+- GitLab PAT stored in **GCP Secret Manager**, fetched at runtime
+- Cloud Run Jobs use **Workload Identity** via the `devops-reports-runner` service account
+- Looker uses a dedicated read-only service account (`looker-bq-reader`)
+- `EXECUTION_ID` is auto-generated by `entrypoint.sh` on every run using `uuidgen`

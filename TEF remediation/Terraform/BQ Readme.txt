@@ -1,277 +1,103 @@
-Yes — below is **production‑ready Terraform** to create **all BigQuery resources** for the unified schema we defined.  
-This is **copy‑pasteable**, modular, and works with **existing CSV ingestion**.
+# Terraform — DevOps Reports Infrastructure
 
-I’ll structure it as:
+Provisions all GCP infrastructure for the devops-reports framework across two projects.
 
-1.  **Provider & variables**
-2.  **Dataset**
-3.  **Tables (one per report type)**
-4.  **Optional best‑practice settings**
+---
 
-***
+## Files
 
-# 1️⃣ Provider & Variables
+| File | Contents |
+|---|---|
+| `BQ variables.tf` | Terraform provider, required providers, and all input variables |
+| `BQ DS + Tables.tf` | Service account, Secret Manager, GCS bucket, BigQuery dataset + 7 tables, IAM bindings |
+| `Cloud Run Jobs.tf` | 4 Cloud Run Job resources (one per report type) |
+| `artifact_registry.tf` | Artifact Registry Docker repository + pull/push IAM |
+| `apis.tf` | GCP API enablement for both projects |
+| `looker.tf` | Looker read-only service account + BigQuery IAM |
+| `terraform.tfvars` | Variable values — fill in before running |
 
-```hcl
-terraform {
-  required_version = ">= 1.4.0"
+---
 
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-  }
-}
+## Two-Project Structure
 
-provider "google" {
-  project = var.project_id
-  region  = var.region
-}
+| Resource | Project variable | Actual project |
+|---|---|---|
+| Service account | `project_id` | `tefde-gcp-fastoss-dev-gke` |
+| Secret Manager | `project_id` | `tefde-gcp-fastoss-dev-gke` |
+| GCS bucket | `project_id` | `tefde-gcp-fastoss-dev-gke` |
+| Artifact Registry | `project_id` | `tefde-gcp-fastoss-dev-gke` |
+| Cloud Run Jobs | `project_id` | `tefde-gcp-fastoss-dev-gke` |
+| BigQuery dataset + tables | `reporting_project_id` | `tefde-gcp-fastoss-dev` |
+| Looker SA | `reporting_project_id` | `tefde-gcp-fastoss-dev` |
 
-variable "project_id" {
-  type        = string
-  description = "GCP project ID"
-}
+---
 
-variable "region" {
-  type        = string
-  default     = "europe-west3"
-}
+## Variables Reference
 
-variable "dataset_id" {
-  type        = string
-  default     = "devops_reports"
-}
+| Variable | Default | Required | Description |
+|---|---|---|---|
+| `project_id` | — | yes | Cloud Run / infrastructure project |
+| `reporting_project_id` | — | yes | BigQuery reporting project |
+| `region` | `europe-west3` | no | GCP region |
+| `dataset_id` | `devops_reports` | no | BigQuery dataset name |
+| `reports_gcs_bucket` | — | yes | GCS bucket name for CSV outputs |
+| `gitlab_token_secret_id` | `gitlab-token` | no | Secret Manager secret ID for GitLab PAT |
+| `cloud_run_sa_name` | `devops-reports-runner` | no | Service account account-id |
+| `container_image` | — | yes | Full Docker image URI |
+| `gitlab_base_url` | `https://dot-portal.de.pri.o2.com/gitlab` | no | GitLab instance URL |
+| `gitlab_subgroup` | `ndl_core` | no | Subgroup scanned by reports |
+| `vpc_connector` | `null` | no | VPC connector (if GitLab is private) |
+| `artifact_registry_repo_id` | `devops-reports` | no | Artifact Registry repository ID |
+| `cicd_sa_email` | — | yes | GitLab Runner SA that pushes Docker images |
+
+---
+
+## Deploy
+
+```bash
+terraform init
+terraform plan
+terraform apply
 ```
 
-***
+---
 
-# 2️⃣ BigQuery Dataset
+## Post-Apply Manual Steps
 
-```hcl
-resource "google_bigquery_dataset" "devops_reports" {
-  dataset_id = var.dataset_id
-  project    = var.project_id
-  location   = "EU"
+### 1. Load the GitLab PAT
 
-  description = "Unified DevOps governance and drift reporting"
-
-  labels = {
-    domain = "devops"
-    owner  = "platform"
-  }
-}
+```bash
+gcloud secrets versions add gitlab-token \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --data-file=- <<< "YOUR_GITLAB_PAT"
 ```
 
-***
+### 2. Build and push the Docker image
 
-# 3️⃣ Tables
+```bash
+docker build -f ../Dockerfile.python \
+  -t europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:latest ..
 
-## ✅ 3.1 `executions` (root table)
-
-```hcl
-resource "google_bigquery_table" "executions" {
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "executions"
-
-  schema = jsonencode([
-    { name = "execution_id", type = "STRING", mode = "REQUIRED" },
-    { name = "report_type", type = "STRING", mode = "REQUIRED" },
-    { name = "execution_ts", type = "TIMESTAMP", mode = "REQUIRED" },
-    { name = "environment", type = "STRING" },
-    { name = "git_ref", type = "STRING" },
-    { name = "source_mode", type = "STRING" },
-    { name = "triggered_by", type = "STRING" },
-    { name = "status", type = "STRING" },
-    { name = "duration_seconds", type = "INT64" }
-  ])
-
-  time_partitioning {
-    type  = "DAY"
-    field = "execution_ts"
-  }
-}
+docker push \
+  europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:latest
 ```
 
-***
+### 3. Create the Looker service account key
 
-## ✅ 3.2 `entities`
-
-```hcl
-resource "google_bigquery_table" "entities" {
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "entities"
-
-  schema = jsonencode([
-    { name = "entity_id", type = "STRING", mode = "REQUIRED" },
-    { name = "entity_type", type = "STRING", mode = "REQUIRED" },
-    { name = "name", type = "STRING", mode = "REQUIRED" },
-    { name = "domain", type = "STRING" },
-    { name = "owner", type = "STRING" },
-    { name = "lifecycle", type = "STRING" }
-  ])
-}
+```bash
+gcloud iam service-accounts keys create looker-bq-reader-key.json \
+  --iam-account=looker-bq-reader@tefde-gcp-fastoss-dev.iam.gserviceaccount.com \
+  --project=tefde-gcp-fastoss-dev
 ```
 
-***
+Upload `looker-bq-reader-key.json` to **Looker Admin → Connections → BigQuery**.
+Delete the local key file after uploading.
 
-## ✅ 3.3 `branch_drift_kpis`
+---
 
-```hcl
-resource "google_bigquery_table" "branch_drift_kpis" {
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "branch_drift_kpis"
+## Service Accounts Created
 
-  schema = jsonencode([
-    { name = "execution_id", type = "STRING", mode = "REQUIRED" },
-    { name = "repo", type = "STRING", mode = "REQUIRED" },
-    { name = "left_branch", type = "STRING" },
-    { name = "right_branch", type = "STRING" },
-    { name = "drift_type", type = "STRING" },
-    { name = "comparison_mode", type = "STRING" },
-    { name = "unique_commits", type = "INT64" },
-    { name = "unique_files", type = "INT64" },
-    { name = "severity", type = "STRING" },
-    { name = "status", type = "STRING" }
-  ])
-
-  clustering = ["repo", "drift_type"]
-}
-```
-
-***
-
-## ✅ 3.4 `branch_drift_evidence`
-
-```hcl
-resource "google_bigquery_table" "branch_drift_evidence" {
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "branch_drift_evidence"
-
-  schema = jsonencode([
-    { name = "execution_id", type = "STRING", mode = "REQUIRED" },
-    { name = "repo", type = "STRING" },
-    { name = "drift_type", type = "STRING" },
-    { name = "discrepancy", type = "STRING" },
-    { name = "commit_sha", type = "STRING" },
-    { name = "commit_date", type = "TIMESTAMP" },
-    { name = "author", type = "STRING" },
-    { name = "file_path", type = "STRING" },
-    { name = "change_type", type = "STRING" },
-    { name = "problem_statement", type = "STRING" }
-  ])
-
-  clustering = ["repo", "discrepancy"]
-}
-```
-
-***
-
-## ✅ 3.5 `env_drift_findings`
-
-```hcl
-resource "google_bigquery_table" "env_drift_findings" {
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "env_drift_findings"
-
-  schema = jsonencode([
-    { name = "execution_id", type = "STRING", mode = "REQUIRED" },
-    { name = "product", type = "STRING" },
-    { name = "component_type", type = "STRING" },
-    { name = "object_type", type = "STRING" },
-    { name = "object_name", type = "STRING" },
-    { name = "drift_category", type = "STRING" },
-    { name = "source_hash", type = "STRING" },
-    { name = "env_hash", type = "STRING" },
-    { name = "severity", type = "STRING" }
-  ])
-
-  clustering = ["product", "component_type"]
-}
-```
-
-***
-
-## ✅ 3.6 `orphan_datasets`
-
-```hcl
-resource "google_bigquery_table" "orphan_datasets" {
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "orphan_datasets"
-
-  schema = jsonencode([
-    { name = "execution_id", type = "STRING", mode = "REQUIRED" },
-    { name = "dataset_name", type = "STRING", mode = "REQUIRED" },
-    { name = "project_id", type = "STRING" },
-    { name = "orphan_status", type = "STRING" },
-    { name = "source_reference_found", type = "BOOL" },
-    { name = "last_modified", type = "TIMESTAMP" },
-    { name = "table_count", type = "INT64" },
-    { name = "owner", type = "STRING" },
-    { name = "risk_score", type = "INT64" }
-  ])
-
-  clustering = ["orphan_status"]
-}
-```
-
-***
-
-## ✅ 3.7 `orphan_dataset_objects`
-
-```hcl
-resource "google_bigquery_table" "orphan_dataset_objects" {
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "orphan_dataset_objects"
-
-  schema = jsonencode([
-    { name = "execution_id", type = "STRING", mode = "REQUIRED" },
-    { name = "dataset_name", type = "STRING", mode = "REQUIRED" },
-    { name = "object_type", type = "STRING" },
-    { name = "object_name", type = "STRING" },
-    { name = "last_modified", type = "TIMESTAMP" },
-    { name = "row_count", type = "INT64" },
-    { name = "storage_mb", type = "FLOAT64" }
-  ])
-}
-```
-
-***
-
-# 4️⃣ Recommended (Optional but Strongly Advised)
-
-### ✅ Dataset‑wide retention
-
-```hcl
-default_table_expiration_ms = 31536000000 # 365 days
-```
-
-### ✅ Authorized views for Looker
-
-*   Create a **BI service account**
-*   Grant:
-
-```text
-roles/bigquery.dataViewer
-roles/bigquery.jobUser
-```
-
-### ✅ Table naming stability
-
-Never rename tables — version via:
-
-*   `execution_id`
-*   `report_type`
-
-***
-
-# ✅ What This Enables Immediately
-
-*   ✅ Direct CSV → BigQuery loads
-*   ✅ One unified Looker model
-*   ✅ Trend analysis across *all* reports
-*   ✅ Governance even if Git repos disappear
-
-***
-
+| SA | Project | Purpose |
+|---|---|---|
+| `devops-reports-runner` | `tefde-gcp-fastoss-dev-gke` | Cloud Run Jobs runtime identity |
+| `looker-bq-reader` | `tefde-gcp-fastoss-dev` | Looker BigQuery read access |

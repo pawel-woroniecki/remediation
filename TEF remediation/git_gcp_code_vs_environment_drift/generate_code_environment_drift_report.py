@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-from google.cloud import bigquery
 from __future__ import annotations
+from google.cloud import bigquery, storage
 
 import argparse
 import csv
@@ -23,6 +23,8 @@ from typing import Any
 
 DEFAULT_CURL = "curl"
 TEXT_SUFFIXES = {".sql", ".yml", ".yaml", ".py", ".txt", ".md", ".json"}
+
+REPORTS_GCS_BUCKET_DEFAULT = "to-be-added-later"
 
 
 @dataclass
@@ -49,8 +51,10 @@ def default_gcs_temp_root() -> str:
 
 
 def default_output_dir() -> str:
-    """Write generated report files into the repository-wide shared outputs folder by default."""
-    return str(Path(__file__).resolve().parents[2] / "outputs")
+    if os.environ.get("OUTPUT_DIR"):
+        return os.environ["OUTPUT_DIR"]
+    path = Path(__file__).resolve()
+    return str(path.parents[2] / "outputs") if len(path.parents) > 2 else str(path.parent / "outputs")
 
 
 def default_nexus_repository(project_name: str) -> str:
@@ -807,6 +811,28 @@ def compare_bigquery(
     return findings
 
 
+def upload_to_gcs(
+    bucket_name: str,
+    gcs_prefix: str,
+    execution_id: str,
+    local_dir: Path,
+) -> None:
+    if bucket_name == REPORTS_GCS_BUCKET_DEFAULT:
+        print(f"[upload] GCS upload skipped: --reports-gcs-bucket not configured.")
+        return
+    try:
+        gcs_client = storage.Client()
+        bucket = gcs_client.bucket(bucket_name)
+        for local_file in sorted(local_dir.iterdir()):
+            if not local_file.is_file():
+                continue
+            blob_name = f"{gcs_prefix}/{execution_id}/{local_dir.name}/{local_file.name}"
+            bucket.blob(blob_name).upload_from_filename(str(local_file))
+            print(f"[upload] → gs://{bucket_name}/{blob_name}")
+    except Exception as exc:
+        print(f"[upload] WARNING: GCS upload failed: {exc}")
+
+
 def write_to_bigquery(
     client: bigquery.Client,
     table_id: str,
@@ -944,21 +970,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gcs-temp-root", default=default_gcs_temp_root())
     parser.add_argument("--keep-workdir", action="store_true")
     parser.add_argument(
-            "--allow-empty-datasets",
-            action="store_true",
-            help="Allow execution to continue when no datasets are resolved. "
-                 "BigQuery comparison will be skipped."
+        "--allow-empty-datasets",
+        action="store_true",
+        help="Allow execution to continue when no datasets are resolved. "
+             "BigQuery comparison will be skipped."
     )
     parser.add_argument(
-            "--gcs-prefix",
-            default="dags/{project_name}",
-            help=(
-                "GCS prefix under the bucket where artifacts are deployed. "
-                "Supports {project_name} substitution. "
-                "Default matches Composer layout: dags/{project_name}"
-            ),
-        )
-        parser.add_argument(
+        "--gcs-prefix",
+        default="dags/{project_name}",
+        help=(
+            "GCS prefix under the bucket where artifacts are deployed. "
+            "Supports {project_name} substitution. "
+            "Default matches Composer layout: dags/{project_name}"
+        ),
+    )
+    parser.add_argument(
         "--reporting-project",
         default=None,
         help=(
@@ -966,33 +992,47 @@ def parse_args() -> argparse.Namespace:
             "Defaults to --gcp-project if not set."
         ),
     )
+    parser.add_argument(
+        "--reports-gcs-bucket",
+        default=REPORTS_GCS_BUCKET_DEFAULT,
+        help="GCS bucket where report output files are uploaded.",
+    )
+    parser.add_argument(
+        "--reports-gcs-prefix",
+        default="env-drift",
+        help="GCS key prefix for report uploads. Default: env-drift",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     """Run the full discrepancy workflow for one data product."""
     status = "success"
+    bq_client = None
     execution_id = os.environ.get("EXECUTION_ID")
     if not execution_id:
         raise ValueError("EXECUTION_ID environment variable must be set")
     args = parse_args()
-    workdir_obj = None
-  try:
-    repo_path = Path(args.repo_path)
-    ensure_exists(repo_path, "Repo path")
-    ensure_exists(Path(args.gcloud_path), "gcloud path")
-    if not args.nexus_repository:
-        args.nexus_repository = default_nexus_repository(args.project_name)
+    # Resolve before try so the except handler can always reference it.
     reporting_project = args.reporting_project or args.gcp_project
-    bq_client = bigquery.Client(project=reporting_project)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    report_root = Path(args.output_dir) / f"{args.project_name}_{timestamp}"
-    report_root.mkdir(parents=True, exist_ok=True)
-
-    workdir_parent = args.temp_root if args.temp_root else None
-    workdir_obj = tempfile.TemporaryDirectory(prefix=f"{args.project_name}_discrepancy_", dir=workdir_parent)
-    workdir = Path(workdir_obj.name)
+    workdir_obj = None
     try:
+        repo_path = Path(args.repo_path)
+        ensure_exists(repo_path, "Repo path")
+        # gcloud path check removed: gcloud is on PATH inside the Docker image.
+        if not args.nexus_repository:
+            args.nexus_repository = default_nexus_repository(args.project_name)
+        bq_client = bigquery.Client(project=reporting_project)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        report_root = Path(args.output_dir) / f"{args.project_name}_{timestamp}"
+        report_root.mkdir(parents=True, exist_ok=True)
+
+        workdir_parent = args.temp_root if args.temp_root else None
+        workdir_obj = tempfile.TemporaryDirectory(
+            prefix=f"{args.project_name}_discrepancy_", dir=workdir_parent
+        )
+        workdir = Path(workdir_obj.name)
+
         snapshot_dir = stage_source_snapshot(args, workdir)
         prod_settings = load_prod_gitlab_settings(snapshot_dir)
         resolved_gcp_project = prod_settings.get("BQ_PROJECT", args.gcp_project_for_substitution)
@@ -1055,7 +1095,6 @@ def main() -> int:
             actual_bq = {}
             bq_findings = []
 
-
         summary = {
             "generated_utc": datetime.now(timezone.utc).isoformat(),
             "project_name": args.project_name,
@@ -1079,63 +1118,57 @@ def main() -> int:
             "reporting_project": reporting_project,
         }
 
-        executions_row = {
-            "execution_id": execution_id,
-            "report_type": "env_drift",
-            "execution_ts": datetime.now(timezone.utc).isoformat(),
-            "environment": resolved_target_env,
-            "git_ref": args.git_ref if args.source_mode == "branch" else None,
-            "source_mode": args.source_mode,
-            "triggered_by": "ui" if execution_id else "manual",
-            "status": status,
-        }
-
+        # Write findings before the execution record so a failure here is
+        # still captured as status=failed in the except block.
+        write_to_bigquery(
+            bq_client,
+            f"{reporting_project}.devops_reports.env_drift_findings",
+            [
+                {
+                    "execution_id": execution_id,
+                    "product": args.project_name,
+                    "component_type": "bigquery",
+                    "object_type": finding.get("source_technology"),
+                    "object_name": finding.get("object_name"),
+                    "drift_category": finding.get("status"),
+                    "source_hash": None,
+                    "env_hash": None,
+                    "severity": finding.get("severity"),
+                }
+                for finding in bq_findings
+            ],
+        )
+        write_to_bigquery(
+            bq_client,
+            f"{reporting_project}.devops_reports.env_drift_findings",
+            [
+                {
+                    "execution_id": execution_id,
+                    "product": args.project_name,
+                    "component_type": "gcs",
+                    "object_type": finding.get("source_technology"),
+                    "object_name": finding.get("path"),
+                    "drift_category": finding.get("status"),
+                    "source_hash": None,
+                    "env_hash": None,
+                    "severity": finding.get("severity"),
+                }
+                for finding in gcs_findings
+            ],
+        )
         write_to_bigquery(
             bq_client,
             f"{reporting_project}.devops_reports.executions",
-            [executions_row],
-        )
-        env_bq_rows = []
-
-       for finding in bq_findings:
-            env_bq_rows.append({
-               "execution_id": execution_id,
-                "product": args.project_name,
-                "component_type": "bigquery",
-                "object_type": finding.get("source_technology"),
-                "object_name": finding.get("object_name"),
-                "drift_category": finding.get("status"),
-                "source_hash": None,   # optional (you can add later)
-                "env_hash": None,
-                "severity": finding.get("severity"),
-            })
-
-       write_to_bigquery(
-            bq_client,
-            f"{reporting_project}.devops_reports.env_drift_findings",
-            env_bq_rows,
-        )
-
-
-       env_gcs_rows = []
-
-        for finding in gcs_findings:
-            env_gcs_rows.append({
+            [{
                 "execution_id": execution_id,
-                "product": args.project_name,
-                "component_type": "gcs",
-                "object_type": finding.get("source_technology"),
-                "object_name": finding.get("path"),
-                "drift_category": finding.get("status"),
-                "source_hash": None,
-                "env_hash": None,
-                "severity": finding.get("severity"),
-            })
-
-        write_to_bigquery(
-            bq_client,
-            f"{reporting_project}.devops_reports.env_drift_findings",
-            env_gcs_rows,
+                "report_type": "env_drift",
+                "execution_ts": datetime.now(timezone.utc).isoformat(),
+                "environment": resolved_target_env,
+                "git_ref": args.git_ref if args.source_mode == "branch" else None,
+                "source_mode": args.source_mode,
+                "triggered_by": "ui",
+                "status": status,
+            }],
         )
 
         write_csv(report_root / "bigquery_findings.csv", bq_findings)
@@ -1153,7 +1186,12 @@ def main() -> int:
                 "execution_id": execution_id,
             },
         )
-        write_markdown(report_root / "report.md", args, summary, bq_findings, gcs_findings, source_dags, source_bq, source_dbt)
+        write_markdown(
+            report_root / "report.md", args, summary,
+            bq_findings, gcs_findings, source_dags, source_bq, source_dbt,
+        )
+
+        upload_to_gcs(args.reports_gcs_bucket, args.reports_gcs_prefix, execution_id, report_root)
 
         if args.keep_workdir:
             shutil.copytree(snapshot_dir, report_root / "rendered_source_snapshot", dirs_exist_ok=True)
@@ -1162,31 +1200,33 @@ def main() -> int:
         print(json.dumps(summary, indent=2))
         return 0
 
-
     except Exception:
         status = "failed"
-
-        # update execution status to FAILED
-        write_to_bigquery(
-            bq_client,
-            f"{reporting_project}.devops_reports.executions",
-            [{
-                "execution_id": execution_id,
-                "report_type": "env_drift",
-                "execution_ts": datetime.now(timezone.utc).isoformat(),
-                "environment": resolved_target_env,
-                "git_ref": args.git_ref if args.source_mode == "branch" else None,
-                "source_mode": args.source_mode,
-                "triggered_by": "ui",
-                "status": status,
-            }],
-        )
-
+        # Guard against bq_client being None when the failure occurs before
+        # the client is initialised.
+        if bq_client is not None:
+            write_to_bigquery(
+                bq_client,
+                f"{reporting_project}.devops_reports.executions",
+                [{
+                    "execution_id": execution_id,
+                    "report_type": "env_drift",
+                    "execution_ts": datetime.now(timezone.utc).isoformat(),
+                    "environment": "prod",
+                    "git_ref": args.git_ref if args.source_mode == "branch" else None,
+                    "source_mode": args.source_mode,
+                    "triggered_by": "ui",
+                    "status": status,
+                }],
+            )
         raise
 
-
     finally:
-        workdir_obj.cleanup()
+        # Guard against workdir_obj being None when the failure occurs before
+        # the temporary directory is created.
+        if workdir_obj is not None:
+            workdir_obj.cleanup()
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -1,0 +1,47 @@
+FROM python:3.11-slim
+
+# Base system tools + prerequisites for gcloud and pwsh apt repos
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        git \
+        apt-transport-https \
+        ca-certificates \
+        gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Google Cloud SDK — required by generate_code_environment_drift_report.py
+# for `gcloud storage cp` and BigQuery REST auth.
+RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] \
+        https://packages.cloud.google.com/apt cloud-sdk main" \
+        | tee /etc/apt/sources.list.d/google-cloud-sdk.list \
+    && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+        | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends google-cloud-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Report scripts
+COPY bigquery_orphan_datasets/unmatched_bq_datasets_report.py              scripts/
+COPY git_gcp_code_vs_environment_drift/generate_code_environment_drift_report.py scripts/
+COPY clone_all_groups_repo/clone_fastoss_b.py                              scripts/
+
+COPY git_branches_gap/report_branch_discrepancies_by_commit.py  scripts/
+COPY git_branches_gap/report_branch_discrepancies_by_content.py scripts/
+
+COPY entrypoint.sh /app/run-report
+RUN chmod +x /app/run-report
+
+# Default output location — override with --output-dir or OUTPUT_DIR env var.
+ENV OUTPUT_DIR=/workspace/outputs
+
+# Run as non-root for defence-in-depth; workspace dir must be writable by this user.
+RUN groupadd --gid 1001 appuser && useradd --uid 1001 --gid 1001 --no-create-home appuser \
+    && mkdir -p /workspace/outputs && chown -R appuser:appuser /workspace
+USER appuser
+
+ENTRYPOINT ["/app/run-report"]

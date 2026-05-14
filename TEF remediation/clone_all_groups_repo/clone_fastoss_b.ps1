@@ -1,7 +1,7 @@
 param(
   [string]$GitLabBaseUrl = "https://dot-portal.de.pri.o2.com/gitlab",
   [string]$GroupPath = "fastoss_b",
-  [string]$TargetDir = ($env:REPO_ROOT ?? "/workspace/repos/fastossb"),
+  [string]$TargetDir = $(if ($env:REPO_ROOT) { $env:REPO_ROOT } else { "/workspace/repos/fastossb" }),
   [ValidateSet("ssh","https")]
   [string]$CloneProtocol = "https",
   [switch]$HardReset,

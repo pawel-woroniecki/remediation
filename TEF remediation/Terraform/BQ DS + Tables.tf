@@ -1,6 +1,86 @@
+# ---------------------------------------------------------------------------
+# Service Account — Cloud Run Jobs runner
+# ---------------------------------------------------------------------------
+resource "google_service_account" "reports_runner" {
+  project      = var.project_id
+  account_id   = var.cloud_run_sa_name
+  display_name = "DevOps Reports Cloud Run Runner"
+  description  = "Used by all devops-reports Cloud Run Jobs to access BQ, GCS, and Secret Manager."
+
+  depends_on = [
+    google_project_service.iam_gke,
+    google_project_service.cloudresourcemanager_gke,
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# Secret Manager — GitLab PAT
+# ---------------------------------------------------------------------------
+# This resource creates the secret container only.
+# Load the actual token value after apply:
+#   gcloud secrets versions add gitlab-token --data-file=- <<< "YOUR_PAT"
+resource "google_secret_manager_secret" "gitlab_token" {
+  project   = var.project_id
+  secret_id = var.gitlab_token_secret_id
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.secretmanager]
+}
+
+resource "google_secret_manager_secret_iam_member" "gitlab_token_accessor" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.gitlab_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.reports_runner.email}"
+}
+
+# ---------------------------------------------------------------------------
+# GCS bucket — report CSV outputs
+# ---------------------------------------------------------------------------
+resource "google_storage_bucket" "devops_reports" {
+  name                        = var.reports_gcs_bucket
+  project                     = var.project_id
+  location                    = "EU"
+  uniform_bucket_level_access = true
+
+  lifecycle_rule {
+    action { type = "Delete" }
+    condition { age = 365 }
+  }
+
+  depends_on = [google_project_service.storage_gke]
+}
+
+resource "google_storage_bucket_iam_member" "reports_runner_gcs_writer" {
+  bucket = google_storage_bucket.devops_reports.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.reports_runner.email}"
+}
+
+# ---------------------------------------------------------------------------
+# BigQuery IAM — dataset-level write + project-level job execution
+# ---------------------------------------------------------------------------
+resource "google_bigquery_dataset_iam_member" "reports_runner_editor" {
+  project    = var.reporting_project_id
+  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.reports_runner.email}"
+}
+
+# bigquery.jobUser must be granted in the project where BQ jobs are executed,
+# which is the reporting project (where the dataset lives).
+resource "google_project_iam_member" "reports_runner_bq_job_user" {
+  project = var.reporting_project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.reports_runner.email}"
+}
+
 resource "google_bigquery_dataset" "devops_reports" {
   dataset_id = var.dataset_id
-  project    = var.project_id
+  project    = var.reporting_project_id
   location   = "EU"
   default_table_expiration_ms = 31536000000 # 365 days
 
@@ -10,9 +90,15 @@ resource "google_bigquery_dataset" "devops_reports" {
     domain = "devops"
     owner  = "platform"
   }
+
+  depends_on = [
+    google_project_service.bigquery,
+    google_project_service.iam_reporting,
+  ]
 }
 
 resource "google_bigquery_table" "executions" {
+  project    = var.reporting_project_id
   dataset_id = google_bigquery_dataset.devops_reports.dataset_id
   table_id   = "executions"
 
@@ -35,6 +121,7 @@ resource "google_bigquery_table" "executions" {
 }
 
 resource "google_bigquery_table" "entities" {
+  project    = var.reporting_project_id
   dataset_id = google_bigquery_dataset.devops_reports.dataset_id
   table_id   = "entities"
 
@@ -49,6 +136,7 @@ resource "google_bigquery_table" "entities" {
 }
 
 resource "google_bigquery_table" "branch_drift_kpis" {
+  project    = var.reporting_project_id
   dataset_id = google_bigquery_dataset.devops_reports.dataset_id
   table_id   = "branch_drift_kpis"
 
@@ -69,6 +157,7 @@ resource "google_bigquery_table" "branch_drift_kpis" {
 }
 
 resource "google_bigquery_table" "branch_drift_evidence" {
+  project    = var.reporting_project_id
   dataset_id = google_bigquery_dataset.devops_reports.dataset_id
   table_id   = "branch_drift_evidence"
 
@@ -89,6 +178,7 @@ resource "google_bigquery_table" "branch_drift_evidence" {
 }
 
 resource "google_bigquery_table" "env_drift_findings" {
+  project    = var.reporting_project_id
   dataset_id = google_bigquery_dataset.devops_reports.dataset_id
   table_id   = "env_drift_findings"
 
@@ -108,6 +198,7 @@ resource "google_bigquery_table" "env_drift_findings" {
 }
 
 resource "google_bigquery_table" "orphan_datasets" {
+  project    = var.reporting_project_id
   dataset_id = google_bigquery_dataset.devops_reports.dataset_id
   table_id   = "orphan_datasets"
 
@@ -127,6 +218,7 @@ resource "google_bigquery_table" "orphan_datasets" {
 }
 
 resource "google_bigquery_table" "orphan_dataset_objects" {
+  project    = var.reporting_project_id
   dataset_id = google_bigquery_dataset.devops_reports.dataset_id
   table_id   = "orphan_dataset_objects"
 

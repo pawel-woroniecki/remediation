@@ -15,16 +15,43 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
-from google.cloud import bigquery
+import google.auth
+import google.auth.transport.requests
+from google.cloud import bigquery, storage
+
+
+GCS_BUCKET_DEFAULT = "to-be-added-later"
+
+
+def upload_to_gcs(
+    bucket_name: str,
+    gcs_prefix: str,
+    execution_id: str,
+    local_dir: Path,
+) -> None:
+    if bucket_name == GCS_BUCKET_DEFAULT:
+        log_step("GCS upload skipped: --gcs-bucket not configured.")
+        return
+    try:
+        gcs_client = storage.Client()
+        bucket = gcs_client.bucket(bucket_name)
+        for local_file in sorted(local_dir.iterdir()):
+            if not local_file.is_file():
+                continue
+            blob_name = f"{gcs_prefix}/{execution_id}/{local_dir.name}/{local_file.name}"
+            bucket.blob(blob_name).upload_from_filename(str(local_file))
+            log_step(f"  Uploaded → gs://{bucket_name}/{blob_name}")
+    except Exception as exc:
+        log_step(f"WARNING: GCS upload failed: {exc}")
 
 
 def default_output_dir() -> str:
-    return str(Path(__file__).resolve().parents[2] / "outputs")
-
-
-def default_gcloud_path() -> str:
-    local_path = Path.home() / ".local" / "bin" / "gcloud.cmd"
-    return str(local_path) if local_path.exists() else "gcloud"
+    if os.environ.get("OUTPUT_DIR"):
+        return os.environ["OUTPUT_DIR"]
+    path = Path(__file__).resolve()
+    # parents[2] is the project root when the script is nested two directories deep.
+    # Fall back to a sibling outputs/ folder when running flat (e.g. inside Docker).
+    return str(path.parents[2] / "outputs") if len(path.parents) > 2 else str(path.parent / "outputs")
 
 
 def log_step(message: str) -> None:
@@ -69,8 +96,12 @@ def read_file_from_git_ref(repo_path: Path, git_ref: str, relative_path: str) ->
     return completed.stdout
 
 
-def gcloud_access_token(gcloud_path: str) -> str:
-    return run_command([gcloud_path, "auth", "print-access-token"]).strip()
+def gcp_access_token() -> str:
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    credentials.refresh(google.auth.transport.requests.Request())
+    return credentials.token
 
 
 def api_get(token: str, url: str) -> dict[str, Any]:
@@ -102,21 +133,41 @@ def api_post_json(token: str, url: str, payload: dict[str, Any]) -> dict[str, An
         raise RuntimeError(f"HTTP {exc.code} for {url}\n{body}") from exc
 
 
-def bigquery_query(token: str, project_id: str, sql: str) -> list[dict[str, Any]]:
+# Fix 4 & 5: check jobComplete and paginate through all result pages.
+def bigquery_query(token: str, project_id: str, sql: str, timeout_ms: int = 30000) -> list[dict[str, Any]]:
     response = api_post_json(
         token,
         f"https://bigquery.googleapis.com/bigquery/v2/projects/{quote(project_id)}/queries",
-        {"query": sql, "useLegacySql": False},
+        {"query": sql, "useLegacySql": False, "timeoutMs": timeout_ms},
     )
+    if not response.get("jobComplete"):
+        job_id = response.get("jobReference", {}).get("jobId", "unknown")
+        raise RuntimeError(f"BigQuery query did not complete within {timeout_ms}ms (jobId={job_id})")
+
     fields = response.get("schema", {}).get("fields", [])
-    rows = response.get("rows", [])
     parsed: list[dict[str, Any]] = []
-    for row in rows:
-        values = row.get("f", [])
-        item: dict[str, Any] = {}
-        for field, value in zip(fields, values):
-            item[field["name"]] = value.get("v")
-        parsed.append(item)
+
+    def _parse_rows(rows: list[Any]) -> None:
+        for row in rows:
+            values = row.get("f", [])
+            item: dict[str, Any] = {}
+            for field, value in zip(fields, values):
+                item[field["name"]] = value.get("v")
+            parsed.append(item)
+
+    _parse_rows(response.get("rows", []))
+
+    page_token = response.get("pageToken")
+    job_id = response.get("jobReference", {}).get("jobId")
+    while page_token and job_id:
+        url = (
+            f"https://bigquery.googleapis.com/bigquery/v2/projects/{quote(project_id)}"
+            f"/queries/{quote(job_id)}?pageToken={quote(page_token)}"
+        )
+        page_response = api_get(token, url)
+        _parse_rows(page_response.get("rows", []))
+        page_token = page_response.get("pageToken")
+
     return parsed
 
 
@@ -308,6 +359,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
 
+
 def write_to_bigquery(
     client: bigquery.Client,
     table_id: str,
@@ -318,7 +370,6 @@ def write_to_bigquery(
     errors = client.insert_rows_json(table_id, rows)
     if errors:
         raise RuntimeError(f"BigQuery insert errors: {errors}")
-
 
 
 def write_markdown(path: Path, summary: dict[str, Any], unmatched_datasets: list[dict[str, Any]]) -> None:
@@ -371,13 +422,21 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--subgroup", default="ndl_core")
     parser.add_argument("--git-ref", default="production")
-    parser.add_argument("--gcloud-path", default=os.environ.get("GCLOUD_PATH", default_gcloud_path()))
     parser.add_argument("--output-dir", default=default_output_dir())
     parser.add_argument("--dataset-include-regex", default=".*")
     parser.add_argument("--dataset-exclude-regex", default="^_")
-    parser.add_argument("--reporting-project", default=None, required=True, help="GCP project where devops_reports dataset exists")
+    parser.add_argument("--reporting-project", default=None, help="GCP project where devops_reports dataset exists; defaults to --gcp-project if omitted")
     parser.add_argument("--gcp-project", default=None)
-
+    parser.add_argument(
+        "--gcs-bucket",
+        default=GCS_BUCKET_DEFAULT,
+        help="GCS bucket where report output files are uploaded.",
+    )
+    parser.add_argument(
+        "--gcs-prefix",
+        default="orphan-datasets",
+        help="GCS key prefix for report uploads. Default: orphan-datasets",
+    )
     return parser.parse_args()
 
 
@@ -388,190 +447,186 @@ def main() -> int:
     if not execution_id:
         raise ValueError("EXECUTION_ID must be set")
     args = parse_args()
-  try:
-    workspace_root = Path(args.workspace_root).resolve()
-    subgroup_root = (workspace_root / args.subgroup).resolve()
+    # Fix 3: resolve reporting_project before the try block so it is always
+    # available in the except handler regardless of where the failure occurs.
     reporting_project = args.reporting_project or args.gcp_project
-    bq_client = bigquery.Client(project=reporting_project)
-    if not subgroup_root.exists():
-        raise ValueError(f"Subgroup path not found: {subgroup_root}")
+    try:
+        # Fix 1: try block is now correctly indented at 4 spaces.
+        workspace_root = Path(args.workspace_root).resolve()
+        subgroup_root = (workspace_root / args.subgroup).resolve()
+        bq_client = bigquery.Client(project=reporting_project)
+        if not subgroup_root.exists():
+            raise ValueError(f"Subgroup path not found: {subgroup_root}")
 
-    output_root = Path(args.output_dir).resolve()
-    output_root.mkdir(parents=True, exist_ok=True)
+        output_root = Path(args.output_dir).resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
 
-    log_step("Starting BigQuery orphan datasets report.")
-    log_step(f"BigQuery project: {args.project_id}")
-    log_step(f"Workspace root: {workspace_root}")
-    log_step(f"Subgroup path: {subgroup_root}")
-    log_step(f"Git ref for repo-side matching: {args.git_ref}")
-    log_step(f"Output root: {output_root}")
+        log_step("Starting BigQuery orphan datasets report.")
+        log_step(f"BigQuery project: {args.project_id}")
+        log_step(f"Workspace root: {workspace_root}")
+        log_step(f"Subgroup path: {subgroup_root}")
+        log_step(f"Git ref for repo-side matching: {args.git_ref}")
+        log_step(f"Output root: {output_root}")
 
-    include_regex = re.compile(args.dataset_include_regex)
-    exclude_regex = re.compile(args.dataset_exclude_regex) if args.dataset_exclude_regex else None
+        include_regex = re.compile(args.dataset_include_regex)
+        exclude_regex = re.compile(args.dataset_exclude_regex) if args.dataset_exclude_regex else None
 
-    log_step(f"Requesting gcloud access token via: {args.gcloud_path}")
-    token = gcloud_access_token(args.gcloud_path)
-    log_step("Access token acquired.")
+        log_step("Requesting GCP access token via Application Default Credentials.")
+        token = gcp_access_token()
+        log_step("Access token acquired.")
 
-    log_step(f"Listing datasets from BigQuery project {args.project_id} ...")
-    all_datasets = [
-        dataset
-        for dataset in list_datasets(token, args.project_id)
-        if include_regex.search(dataset) and not (exclude_regex and exclude_regex.search(dataset))
-    ]
-    log_step(f"Datasets after include/exclude filters: {len(all_datasets)}")
+        log_step(f"Listing datasets from BigQuery project {args.project_id} ...")
+        all_datasets = [
+            dataset
+            for dataset in list_datasets(token, args.project_id)
+            if include_regex.search(dataset) and not (exclude_regex and exclude_regex.search(dataset))
+        ]
+        log_step(f"Datasets after include/exclude filters: {len(all_datasets)}")
 
-    repo_refs, dataset_to_repos = collect_repo_dataset_references(subgroup_root, args.git_ref)
+        repo_refs, dataset_to_repos = collect_repo_dataset_references(subgroup_root, args.git_ref)
 
-    unmatched_datasets: list[dict[str, Any]] = []
-    unmatched_objects_rows: list[dict[str, Any]] = []
-    dataset_errors: list[dict[str, str]] = []
-    unmatched_candidates = [dataset for dataset in all_datasets if dataset not in dataset_to_repos]
+        unmatched_datasets: list[dict[str, Any]] = []
+        unmatched_objects_rows: list[dict[str, Any]] = []
+        dataset_errors: list[dict[str, str]] = []
+        unmatched_candidates = [dataset for dataset in all_datasets if dataset not in dataset_to_repos]
 
-    log_step(
-        f"Managed datasets referenced by repos: {len(dataset_to_repos)}; "
-        f"unmatched datasets to inspect: {len(unmatched_candidates)}."
-    )
-
-    for index, dataset in enumerate(all_datasets, start=1):
-        # A dataset is considered managed as soon as at least one repo declares
-        # it in BQ_DATASET_NAMES at the selected Git ref.
-        if dataset in dataset_to_repos:
-            continue
-        unmatched_index = len(unmatched_datasets) + 1
-        log_step(f"Unmatched dataset {unmatched_index}/{len(unmatched_candidates)}: {dataset} (dataset {index}/{len(all_datasets)} overall)")
-        objects, error = fetch_dataset_objects(token, args.project_id, dataset)
-        for item in objects:
-            unmatched_objects_rows.append(item)
-        if error:
-            log_step(f"  Metadata issues for {dataset}: {error}")
-            dataset_errors.append({"dataset": dataset, "error": error})
-        log_step(f"  Objects found in {dataset}: {len(objects)}")
-        unmatched_datasets.append(
-            {
-                "dataset": dataset,
-                "object_count": len(objects),
-                "object_type_counts": summarize_object_types(objects),
-                "error": error,
-            }
+        log_step(
+            f"Managed datasets referenced by repos: {len(dataset_to_repos)}; "
+            f"unmatched datasets to inspect: {len(unmatched_candidates)}."
         )
 
-    unmatched_datasets.sort(key=lambda item: item["dataset"])
-    unmatched_dataset_rows = [
-        {
-            "dataset": item["dataset"],
-            "object_count": item["object_count"],
-            # Keep the CSV flat while preserving the object-type breakdown.
-            "object_type_counts": json.dumps(item["object_type_counts"], ensure_ascii=True, sort_keys=True),
-            "error": item.get("error") or "",
-        }
-        for item in unmatched_datasets
-    ]
+        for index, dataset in enumerate(all_datasets, start=1):
+            # A dataset is considered managed as soon as at least one repo declares
+            # it in BQ_DATASET_NAMES at the selected Git ref.
+            if dataset in dataset_to_repos:
+                continue
+            unmatched_index = len(unmatched_datasets) + 1
+            log_step(f"Unmatched dataset {unmatched_index}/{len(unmatched_candidates)}: {dataset} (dataset {index}/{len(all_datasets)} overall)")
+            objects, error = fetch_dataset_objects(token, args.project_id, dataset)
+            for item in objects:
+                unmatched_objects_rows.append(item)
+            if error:
+                log_step(f"  Metadata issues for {dataset}: {error}")
+                dataset_errors.append({"dataset": dataset, "error": error})
+            log_step(f"  Objects found in {dataset}: {len(objects)}")
+            unmatched_datasets.append(
+                {
+                    "dataset": dataset,
+                    "object_count": len(objects),
+                    "object_type_counts": summarize_object_types(objects),
+                    "error": error,
+                }
+            )
 
-    summary = {
-        "generated_utc": datetime.now(timezone.utc).isoformat(),
-        "project_id": args.project_id,
-        "subgroup": args.subgroup,
-        "subgroup_root": str(subgroup_root),
-        "git_ref": args.git_ref,
-        "datasets_scanned": len(all_datasets),
-        "repos_scanned": len([path for path in subgroup_root.iterdir() if path.is_dir() and (path / ".git").exists()]),
-        "repos_with_dataset_refs": len([ref for ref in repo_refs if ref.datasets]),
-        "datasets_referenced": len(dataset_to_repos),
-        "unmatched_datasets": len(unmatched_datasets),
-        "datasets_with_errors": len(dataset_errors),
-    }
-
-    
-
-
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = output_root / f"{args.subgroup}_unmatched_bq_datasets_{timestamp}"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    log_step(f"Writing report files to {run_dir}")
-
-    write_markdown(run_dir / "report.md", summary, unmatched_datasets)
-    write_csv(run_dir / "unmatched_datasets.csv", unmatched_dataset_rows)
-    write_csv(run_dir / "unmatched_objects.csv", unmatched_objects_rows)
-    write_csv(run_dir / "dataset_errors.csv", dataset_errors)
-    write_csv(
-        run_dir / "repo_dataset_references.csv",
-        [
+        unmatched_datasets.sort(key=lambda item: item["dataset"])
+        unmatched_dataset_rows = [
             {
-                "repo": ref.repo,
-                "ci_path": ref.ci_path,
-                "git_ref": ref.git_ref,
-                "datasets": ", ".join(ref.datasets),
-                "dataset_count": len(ref.datasets),
+                "dataset": item["dataset"],
+                "object_count": item["object_count"],
+                # Keep the CSV flat while preserving the object-type breakdown.
+                "object_type_counts": json.dumps(item["object_type_counts"], ensure_ascii=True, sort_keys=True),
+                "error": item.get("error") or "",
             }
-            for ref in repo_refs
-        ],
-    )
-    write_json(
-        run_dir / "unmatched_datasets.json",
-        {
-            "summary": summary,
-            "unmatched_datasets": unmatched_datasets,
-            "unmatched_objects": unmatched_objects_rows,
-            "dataset_errors": dataset_errors,
-            "repo_dataset_references": [
+            for item in unmatched_datasets
+        ]
+
+        summary = {
+            "generated_utc": datetime.now(timezone.utc).isoformat(),
+            "project_id": args.project_id,
+            "subgroup": args.subgroup,
+            "subgroup_root": str(subgroup_root),
+            "git_ref": args.git_ref,
+            "datasets_scanned": len(all_datasets),
+            "repos_scanned": len([path for path in subgroup_root.iterdir() if path.is_dir() and (path / ".git").exists()]),
+            "repos_with_dataset_refs": len([ref for ref in repo_refs if ref.datasets]),
+            "datasets_referenced": len(dataset_to_repos),
+            "unmatched_datasets": len(unmatched_datasets),
+            "datasets_with_errors": len(dataset_errors),
+        }
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        run_dir = output_root / f"{args.subgroup}_unmatched_bq_datasets_{timestamp}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        log_step(f"Writing report files to {run_dir}")
+
+        write_markdown(run_dir / "report.md", summary, unmatched_datasets)
+        write_csv(run_dir / "unmatched_datasets.csv", unmatched_dataset_rows)
+        write_csv(run_dir / "unmatched_objects.csv", unmatched_objects_rows)
+        write_csv(run_dir / "dataset_errors.csv", dataset_errors)
+        write_csv(
+            run_dir / "repo_dataset_references.csv",
+            [
                 {
                     "repo": ref.repo,
                     "ci_path": ref.ci_path,
                     "git_ref": ref.git_ref,
-                    "datasets": ref.datasets,
+                    "datasets": ", ".join(ref.datasets),
+                    "dataset_count": len(ref.datasets),
                 }
                 for ref in repo_refs
             ],
-        },
-    )
+        )
+        write_json(
+            run_dir / "unmatched_datasets.json",
+            {
+                "summary": summary,
+                "unmatched_datasets": unmatched_datasets,
+                "unmatched_objects": unmatched_objects_rows,
+                "dataset_errors": dataset_errors,
+                "repo_dataset_references": [
+                    {
+                        "repo": ref.repo,
+                        "ci_path": ref.ci_path,
+                        "git_ref": ref.git_ref,
+                        "datasets": ref.datasets,
+                    }
+                    for ref in repo_refs
+                ],
+            },
+        )
 
-    write_to_bigquery(
-        bq_client,
-        f"{reporting_project}.devops_reports.executions",
-        [{
-            "execution_id": execution_id,
-            "report_type": "orphan_datasets",
-            "execution_ts": datetime.now(timezone.utc).isoformat(),
-            "environment": "prod",
-            "git_ref": args.git_ref,
-            "source_mode": "branch",
-            "triggered_by": "ui",
-            "status": status,
-        }],
-    )
-    
-    rows = []
+        # Upload local report files to GCS before writing to BigQuery so the
+        # files are preserved even if a BQ insert fails.
+        upload_to_gcs(args.gcs_bucket, args.gcs_prefix, execution_id, run_dir)
 
-    for item in unmatched_datasets:
-        rows.append({
-            "execution_id": execution_id,
-            "product": args.subgroup,
-            "component_type": "bigquery_dataset",
-            "object_type": json.dumps(item["object_type_counts"], sort_keys=True),
-            "object_name": item["dataset"],
-            "drift_category": "orphan_dataset",
-            "source_hash": None,
-            "env_hash": None,
-            "severity": "high" if item["object_count"] > 0 else "medium",
-        })
+        # Write findings before the execution record so that a failure during
+        # the findings insert is still captured as status=failed.
+        # Objects first, then dataset-level summary, then execution record.
+        write_to_bigquery(
+            bq_client,
+            f"{reporting_project}.devops_reports.orphan_dataset_objects",
+            [
+                {
+                    "execution_id": execution_id,
+                    "dataset_name": obj["dataset"],
+                    "object_type": obj["object_type"],
+                    "object_name": obj["object_name"],
+                    "last_modified": None,
+                    "row_count": None,
+                    "storage_mb": None,
+                }
+                for obj in unmatched_objects_rows
+            ],
+        )
+        write_to_bigquery(
+            bq_client,
+            f"{reporting_project}.devops_reports.orphan_datasets",
+            [
+                {
+                    "execution_id": execution_id,
+                    "dataset_name": item["dataset"],
+                    "project_id": args.project_id,
+                    "orphan_status": "orphan",
+                    "source_reference_found": False,
+                    "last_modified": None,
+                    "table_count": item["object_count"],
+                    "owner": None,
+                    "risk_score": 2 if item["object_count"] > 0 else 1,
+                }
+                for item in unmatched_datasets
+            ],
+        )
 
-    write_to_bigquery(
-        bq_client,
-        f"{reporting_project}.devops_reports.env_drift_findings",
-        rows,
-    )
-
-    log_step("Report generation completed.")
-    print(f"Report written to: {run_dir}")
-    print(json.dumps(summary, indent=2))
-    return 0
-
-    except Exception:
-        status = "failed"
-
-        # update execution status to FAILED
         write_to_bigquery(
             bq_client,
             f"{reporting_project}.devops_reports.executions",
@@ -587,6 +642,30 @@ def main() -> int:
             }],
         )
 
+        log_step("Report generation completed.")
+        print(f"Report written to: {run_dir}")
+        print(json.dumps(summary, indent=2))
+        return 0
+
+    except Exception:
+        status = "failed"
+        # Fix 2: guard against bq_client being None when the failure occurs
+        # before the client is initialised (e.g. bad --reporting-project value).
+        if bq_client is not None:
+            write_to_bigquery(
+                bq_client,
+                f"{reporting_project}.devops_reports.executions",
+                [{
+                    "execution_id": execution_id,
+                    "report_type": "orphan_datasets",
+                    "execution_ts": datetime.now(timezone.utc).isoformat(),
+                    "environment": "prod",
+                    "git_ref": args.git_ref,
+                    "source_mode": "branch",
+                    "triggered_by": "ui",
+                    "status": status,
+                }],
+            )
         raise
 
 
