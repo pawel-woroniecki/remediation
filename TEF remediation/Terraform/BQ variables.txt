@@ -1,0 +1,30 @@
+terraform {
+  required_version = ">= 1.4.0"
+
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+variable "project_id" {
+  type        = string
+  description = "GCP project ID"
+}
+
+variable "region" {
+  type        = string
+  default     = "europe-west3"
+}
+
+variable "dataset_id" {
+  type        = string
+  default     = "devops_reports"
+}

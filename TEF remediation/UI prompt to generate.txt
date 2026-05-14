@@ -1,0 +1,122 @@
+## ✅ Prompt for Vibecoding AI
+
+> **Context**
+>
+> I have an existing repository with **PowerShell and Python scripts** that generate DevOps and governance reports.  
+> These scripts:
+>
+> *   Are CLI‑based and already work correctly
+> *   Require input parameters (CLI args + environment variables)
+> *   Produce outputs as CSV / JSON / Markdown files
+> *   Must NOT be rewritten or have business logic changed
+>
+> The reports include:
+>
+> 1.  Commit‑based branch drift
+> 2.  File‑diff‑based branch drift
+> 3.  Environment vs branch drift (Git vs BigQuery / GCS)
+> 4.  Orphan BigQuery datasets (even if source code is missing)
+
+***
+
+> **Goal**
+>
+> Design and implement a **simple web UI** that allows users to:
+>
+> *   Select which report to run
+> *   Provide the required input parameters
+> *   Trigger execution of the existing scripts
+> *   View execution status and links to outputs
+>
+> The UI should be a **thin orchestration layer**, not a reporting engine.
+
+***
+
+> **Architecture Constraints (Must Follow)**
+>
+> ✅ Scripts run inside a **Docker container**  
+> ✅ One container image supports **all scripts**  
+> ✅ Scripts are executed as **batch jobs**, not long‑running services  
+> ✅ Parameters are passed as **CLI arguments and environment variables**  
+> ✅ Secrets are stored in a secure secrets manager  
+> ✅ Execution is **stateless**  
+> ✅ Outputs are written to a shared output directory and later stored centrally
+>
+> 🚫 Do NOT embed business logic in the UI  
+> 🚫 Do NOT allow arbitrary shell execution  
+> 🚫 Do NOT hardcode secrets  
+> 🚫 Do NOT modify existing scripts unless strictly necessary
+
+***
+
+> **Recommended Execution Model**
+>
+> *   Use a **wrapper entrypoint** inside the container, e.g.:
+>         run-report <report_type> [script arguments]
+> *   Each report type maps to exactly one existing script.
+> *   The UI triggers executions by invoking container jobs with arguments.
+>
+> Example:
+>
+>     run-report commit_drift -DateTag 2026-05-11 -OutputDir /workspace/outputs
+
+***
+
+> **UI Requirements**
+>
+> The UI should:
+>
+> *   Show a **list of available reports**
+> *   Dynamically render a **parameter form** based on the selected report
+> *   Validate required parameters before execution
+> *   Trigger a container job
+> *   Show:
+>     *   Execution ID
+>     *   Status (running / success / failed)
+>     *   Link to outputs (e.g., Cloud Storage)
+>
+> The UI does NOT need advanced styling; clarity and correctness matter more.
+
+***
+
+> **Report Metadata Model (Important)**
+>
+> Reports should be defined declaratively, for example:
+>
+> ```yaml
+> commit_drift:
+>   label: "Commit-based branch drift"
+>   parameters:
+>     DateTag:
+>       type: string
+>       required: true
+>     OutputDir:
+>       type: string
+>       default: /workspace/outputs
+> ```
+>
+> The UI should use this metadata to generate forms automatically.
+
+***
+
+> **Technology Preferences**
+>
+> *   Backend: lightweight API (Python or Node.js)
+> *   UI: simple web UI (React, Vue, or plain HTML is fine)
+> *   Execution: containerized batch jobs (e.g., Cloud Run Jobs or Kubernetes Jobs)
+> *   Authentication: platform IAM or single sign‑on
+>
+> Use sensible defaults and explain assumptions.
+
+***
+
+> **Deliverables Expected**
+>
+> 1.  High‑level architecture diagram (textual description is fine)
+> 2.  Backend API design (endpoints + payloads)
+> 3.  UI behavior and flow
+> 4.  How parameters are passed to the container
+> 5.  How executions are tracked and outputs exposed
+>
+> Focus on **clean separation of concerns, simplicity, and safety**.
+
