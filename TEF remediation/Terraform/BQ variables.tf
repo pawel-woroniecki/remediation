@@ -1,19 +1,3 @@
-terraform {
-  required_version = ">= 1.4.0"
-
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-  }
-}
-
-provider "google" {
-  project = var.project_id
-  region  = var.region
-}
-
 variable "project_id" {
   type        = string
   description = "GCP project ID for Cloud Run Jobs, GCS bucket, Secret Manager, and the service account (tefde-gcp-fastoss-dev-gke)."
@@ -83,4 +67,20 @@ variable "artifact_registry_repo_id" {
 variable "cicd_sa_email" {
   type        = string
   description = "Service account email used by the CI/CD pipeline (e.g. GitLab Runner) to push Docker images to Artifact Registry."
+}
+
+variable "ui_container_image" {
+  type        = string
+  description = "Full URI of the Docker image for the DevOps Reports web UI Cloud Run Service, e.g. europe-west3-docker.pkg.dev/PROJECT/REPO/devops-reports-ui:latest"
+}
+
+variable "bq_scan_project_id" {
+  type        = string
+  description = "GCP project ID that contains the BigQuery datasets scanned by the orphan_datasets report. Often a production project separate from the reporting project."
+}
+
+variable "ui_invoker_member" {
+  type        = string
+  default     = "allAuthenticatedUsers"
+  description = "IAM member string allowed to invoke the UI Cloud Run Service. Use 'domain:yourcompany.com' to restrict to a Google Workspace domain, or 'group:team@yourcompany.com' for a specific group."
 }

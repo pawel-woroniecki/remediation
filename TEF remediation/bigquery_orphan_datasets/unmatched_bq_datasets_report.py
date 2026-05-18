@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,19 +31,15 @@ def upload_to_gcs(
     local_dir: Path,
 ) -> None:
     if bucket_name == GCS_BUCKET_DEFAULT:
-        log_step("GCS upload skipped: --gcs-bucket not configured.")
-        return
-    try:
-        gcs_client = storage.Client()
-        bucket = gcs_client.bucket(bucket_name)
-        for local_file in sorted(local_dir.iterdir()):
-            if not local_file.is_file():
-                continue
-            blob_name = f"{gcs_prefix}/{execution_id}/{local_dir.name}/{local_file.name}"
-            bucket.blob(blob_name).upload_from_filename(str(local_file))
-            log_step(f"  Uploaded → gs://{bucket_name}/{blob_name}")
-    except Exception as exc:
-        log_step(f"WARNING: GCS upload failed: {exc}")
+        raise ValueError("--gcs-bucket is required; no GCS upload target configured.")
+    gcs_client = storage.Client()
+    bucket = gcs_client.bucket(bucket_name)
+    for local_file in sorted(local_dir.iterdir()):
+        if not local_file.is_file():
+            continue
+        blob_name = f"{gcs_prefix}/{execution_id}/{local_dir.name}/{local_file.name}"
+        bucket.blob(blob_name).upload_from_filename(str(local_file))
+        log("INFO", "File uploaded to GCS", uri=f"gs://{bucket_name}/{blob_name}")
 
 
 def default_output_dir() -> str:
@@ -54,9 +51,8 @@ def default_output_dir() -> str:
     return str(path.parents[2] / "outputs") if len(path.parents) > 2 else str(path.parent / "outputs")
 
 
-def log_step(message: str) -> None:
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] {message}")
+def log(severity: str, message: str, **extra) -> None:
+    print(json.dumps({"severity": severity, "message": message, **extra}, default=str), flush=True)
 
 
 def run_command(command: list[str]) -> str:
@@ -244,27 +240,27 @@ def collect_repo_dataset_references(subgroup_root: Path, branch_name: str) -> tu
     dataset_to_repos: dict[str, list[str]] = defaultdict(list)
     repo_total = len(repos)
 
-    log_step(f"Scanning subgroup repos in {subgroup_root} ... found {repo_total} git repos.")
+    log("INFO", "Scanning subgroup repos", path=str(subgroup_root), total=repo_total)
 
     for index, repo in enumerate(repos, start=1):
-        log_step(f"Repo {index}/{repo_total}: {repo.name}")
+        log("INFO", "Processing repo", index=index, total=repo_total, repo=repo.name)
         git_ref = resolve_branch_ref(repo, branch_name)
         if not git_ref:
-            log_step(f"  Skipping {repo.name}: branch/ref '{branch_name}' was not found locally or on origin.")
+            log("WARNING", "Skipping repo: branch not found", repo=repo.name, branch=branch_name)
             continue
         try:
             # Read .gitlab-ci.yml directly from the selected ref so the report
             # reflects deployed branch content rather than the current worktree.
             ci_text = read_file_from_git_ref(repo, git_ref, ".gitlab-ci.yml")
             if ci_text is None:
-                log_step(f"  Skipping {repo.name}: .gitlab-ci.yml not found at {git_ref}.")
+                log("WARNING", "Skipping repo: .gitlab-ci.yml not found", repo=repo.name, git_ref=git_ref)
                 continue
             variables = load_gitlab_variables_from_text(ci_text)
         except Exception:
-            log_step(f"  Skipping {repo.name}: failed to read or parse .gitlab-ci.yml at {git_ref}.")
+            log("WARNING", "Skipping repo: failed to parse .gitlab-ci.yml", repo=repo.name, git_ref=git_ref)
             continue
         datasets = parse_dataset_names(variables.get("BQ_DATASET_NAMES"))
-        log_step(f"  Using {git_ref}; datasets declared: {len(datasets)}")
+        log("INFO", "Repo datasets resolved", git_ref=git_ref, dataset_count=len(datasets))
         references.append(
             RepoDatasetReference(
                 repo=repo.name,
@@ -279,10 +275,9 @@ def collect_repo_dataset_references(subgroup_root: Path, branch_name: str) -> tu
 
     for repos_for_dataset in dataset_to_repos.values():
         repos_for_dataset.sort()
-    log_step(
-        f"Finished repo scan: repos with BQ_DATASET_NAMES={len([ref for ref in references if ref.datasets])}; "
-        f"distinct referenced datasets={len(dataset_to_repos)}."
-    )
+    log("INFO", "Repo scan complete",
+        repos_with_datasets=len([ref for ref in references if ref.datasets]),
+        distinct_datasets=len(dataset_to_repos))
     return references, dataset_to_repos
 
 
@@ -372,6 +367,17 @@ def write_to_bigquery(
         raise RuntimeError(f"BigQuery insert errors: {errors}")
 
 
+def execution_id_exists(client: bigquery.Client, table_id: str, eid: str) -> bool:
+    """Return True if this execution_id is already present — signals a Cloud Run retry."""
+    rows = list(client.query(
+        f"SELECT 1 FROM `{table_id}` WHERE execution_id = @eid AND execution_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 DAY) LIMIT 1",
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("eid", "STRING", eid)]
+        ),
+    ).result())
+    return len(rows) > 0
+
+
 def write_markdown(path: Path, summary: dict[str, Any], unmatched_datasets: list[dict[str, Any]]) -> None:
     lines: list[str] = []
     lines.append("# Unmatched BigQuery Datasets Report")
@@ -443,12 +449,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     status = "success"
     bq_client = None
+    gcs_path: str | None = None
     execution_id = os.environ.get("EXECUTION_ID")
     if not execution_id:
         raise ValueError("EXECUTION_ID must be set")
+    triggered_by = os.environ.get("TRIGGERED_BY", "ui")
+    start_time = time.monotonic()
     args = parse_args()
-    # Fix 3: resolve reporting_project before the try block so it is always
-    # available in the except handler regardless of where the failure occurs.
     reporting_project = args.reporting_project or args.gcp_project
     try:
         # Fix 1: try block is now correctly indented at 4 spaces.
@@ -461,27 +468,23 @@ def main() -> int:
         output_root = Path(args.output_dir).resolve()
         output_root.mkdir(parents=True, exist_ok=True)
 
-        log_step("Starting BigQuery orphan datasets report.")
-        log_step(f"BigQuery project: {args.project_id}")
-        log_step(f"Workspace root: {workspace_root}")
-        log_step(f"Subgroup path: {subgroup_root}")
-        log_step(f"Git ref for repo-side matching: {args.git_ref}")
-        log_step(f"Output root: {output_root}")
+        log("INFO", "Starting orphan datasets report",
+            bq_project=args.project_id, subgroup=args.subgroup, git_ref=args.git_ref)
 
         include_regex = re.compile(args.dataset_include_regex)
         exclude_regex = re.compile(args.dataset_exclude_regex) if args.dataset_exclude_regex else None
 
-        log_step("Requesting GCP access token via Application Default Credentials.")
+        log("INFO", "Acquiring GCP access token")
         token = gcp_access_token()
-        log_step("Access token acquired.")
+        log("INFO", "Access token acquired")
 
-        log_step(f"Listing datasets from BigQuery project {args.project_id} ...")
+        log("INFO", "Listing BigQuery datasets", project=args.project_id)
         all_datasets = [
             dataset
             for dataset in list_datasets(token, args.project_id)
             if include_regex.search(dataset) and not (exclude_regex and exclude_regex.search(dataset))
         ]
-        log_step(f"Datasets after include/exclude filters: {len(all_datasets)}")
+        log("INFO", "Datasets after filters", count=len(all_datasets))
 
         repo_refs, dataset_to_repos = collect_repo_dataset_references(subgroup_root, args.git_ref)
 
@@ -490,10 +493,8 @@ def main() -> int:
         dataset_errors: list[dict[str, str]] = []
         unmatched_candidates = [dataset for dataset in all_datasets if dataset not in dataset_to_repos]
 
-        log_step(
-            f"Managed datasets referenced by repos: {len(dataset_to_repos)}; "
-            f"unmatched datasets to inspect: {len(unmatched_candidates)}."
-        )
+        log("INFO", "Dataset scan scope",
+            managed=len(dataset_to_repos), unmatched=len(unmatched_candidates))
 
         for index, dataset in enumerate(all_datasets, start=1):
             # A dataset is considered managed as soon as at least one repo declares
@@ -501,14 +502,15 @@ def main() -> int:
             if dataset in dataset_to_repos:
                 continue
             unmatched_index = len(unmatched_datasets) + 1
-            log_step(f"Unmatched dataset {unmatched_index}/{len(unmatched_candidates)}: {dataset} (dataset {index}/{len(all_datasets)} overall)")
+            log("INFO", "Inspecting unmatched dataset",
+                dataset=dataset, unmatched_index=unmatched_index, total_unmatched=len(unmatched_candidates))
             objects, error = fetch_dataset_objects(token, args.project_id, dataset)
             for item in objects:
                 unmatched_objects_rows.append(item)
             if error:
-                log_step(f"  Metadata issues for {dataset}: {error}")
+                log("WARNING", "Dataset metadata issues", dataset=dataset, error=error)
                 dataset_errors.append({"dataset": dataset, "error": error})
-            log_step(f"  Objects found in {dataset}: {len(objects)}")
+            log("INFO", "Objects found", dataset=dataset, count=len(objects))
             unmatched_datasets.append(
                 {
                     "dataset": dataset,
@@ -547,7 +549,7 @@ def main() -> int:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         run_dir = output_root / f"{args.subgroup}_unmatched_bq_datasets_{timestamp}"
         run_dir.mkdir(parents=True, exist_ok=True)
-        log_step(f"Writing report files to {run_dir}")
+        log("INFO", "Writing report files", path=str(run_dir))
 
         write_markdown(run_dir / "report.md", summary, unmatched_datasets)
         write_csv(run_dir / "unmatched_datasets.csv", unmatched_dataset_rows)
@@ -588,6 +590,15 @@ def main() -> int:
         # Upload local report files to GCS before writing to BigQuery so the
         # files are preserved even if a BQ insert fails.
         upload_to_gcs(args.gcs_bucket, args.gcs_prefix, execution_id, run_dir)
+        gcs_path = f"gs://{args.gcs_bucket}/{args.gcs_prefix}/{execution_id}/"
+
+        # Dedup guard — skips BQ writes if this execution_id is already present.
+        # Defense-in-depth against accidental duplicate runs with the same ID.
+        if execution_id_exists(bq_client, f"{reporting_project}.devops_reports.executions", execution_id):
+            log("WARNING", "Execution already recorded — skipping BQ writes", execution_id=execution_id)
+            return 0
+
+        duration_seconds = int(time.monotonic() - start_time)
 
         # Write findings before the execution record so that a failure during
         # the findings insert is still captured as status=failed.
@@ -637,20 +648,18 @@ def main() -> int:
                 "environment": "prod",
                 "git_ref": args.git_ref,
                 "source_mode": "branch",
-                "triggered_by": "ui",
+                "triggered_by": triggered_by,
                 "status": status,
+                "duration_seconds": duration_seconds,
+                "gcs_path": gcs_path,
             }],
         )
 
-        log_step("Report generation completed.")
-        print(f"Report written to: {run_dir}")
-        print(json.dumps(summary, indent=2))
+        log("INFO", "Report generation completed", path=str(run_dir), **summary)
         return 0
 
     except Exception:
         status = "failed"
-        # Fix 2: guard against bq_client being None when the failure occurs
-        # before the client is initialised (e.g. bad --reporting-project value).
         if bq_client is not None:
             write_to_bigquery(
                 bq_client,
@@ -662,8 +671,10 @@ def main() -> int:
                     "environment": "prod",
                     "git_ref": args.git_ref,
                     "source_mode": "branch",
-                    "triggered_by": "ui",
-                    "status": status,
+                    "triggered_by": triggered_by,
+                    "status": "failed",
+                    "duration_seconds": int(time.monotonic() - start_time),
+                    "gcs_path": gcs_path,
                 }],
             )
         raise

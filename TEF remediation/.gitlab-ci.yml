@@ -1,0 +1,107 @@
+stages:
+  - build
+  - terraform
+
+variables:
+  REGISTRY: europe-west3-docker.pkg.dev
+  PROJECT_ID: tefde-gcp-fastoss-dev-gke
+  REPO: devops-reports
+  # DinD: disable TLS so Docker client talks to the daemon over plain TCP.
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_HOST: tcp://docker:2375
+
+# ---------------------------------------------------------------------------
+# GCP authentication anchor
+#
+# Uses the CI/CD service account key stored as a masked GitLab CI variable
+# named GCP_SA_KEY (JSON format). The key must belong to the service account
+# whose email is set in var.cicd_sa_email in Terraform — that account already
+# has roles/artifactregistry.writer on the Artifact Registry repo.
+#
+# To upgrade to keyless Workload Identity Federation (no long-lived keys):
+#   1. Add a google_iam_workload_identity_pool + provider resource in Terraform
+#      targeting the GitLab OIDC issuer (https://gitlab.com).
+#   2. Grant the pool serviceAccount impersonation on cicd_sa_email.
+#   3. Replace this anchor with the id_tokens + gcloud oidc flow.
+# ---------------------------------------------------------------------------
+.gcp_auth: &gcp_auth
+  image: google/cloud-sdk:slim
+  services:
+    - docker:24-dind
+  before_script:
+    # Install docker CLI — google/cloud-sdk:slim is Debian-based but ships
+    # without Docker; docker.io provides the CLI to talk to the DinD daemon.
+    - apt-get update -qq && apt-get install -y --no-install-recommends docker.io
+    - echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+    - gcloud auth activate-service-account --key-file=/tmp/gcp-sa-key.json
+    - gcloud auth configure-docker "$REGISTRY" --quiet
+    - rm -f /tmp/gcp-sa-key.json
+
+# ---------------------------------------------------------------------------
+# Reports image (all 4 Cloud Run Jobs)
+# ---------------------------------------------------------------------------
+build-reports:
+  stage: build
+  <<: *gcp_auth
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - Dockerfile.python
+        - requirements.txt
+        - git_branches_gap/**/*
+        - git_gcp_code_vs_environment_drift/**/*
+        - bigquery_orphan_datasets/**/*
+        - clone_all_groups_repo/**/*
+        - entrypoint.sh
+  script:
+    - IMAGE="$REGISTRY/$PROJECT_ID/$REPO/devops-reports"
+    - docker build
+        -f Dockerfile.python
+        --build-arg BUILD_SHA="$CI_COMMIT_SHORT_SHA"
+        -t "$IMAGE:$CI_COMMIT_SHORT_SHA"
+        -t "$IMAGE:latest"
+        .
+    - docker push "$IMAGE:$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMAGE:latest"
+
+# ---------------------------------------------------------------------------
+# UI image (Cloud Run Service)
+# ---------------------------------------------------------------------------
+build-ui:
+  stage: build
+  <<: *gcp_auth
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - ui/Dockerfile
+        - ui/**/*
+  script:
+    - IMAGE="$REGISTRY/$PROJECT_ID/$REPO/devops-reports-ui"
+    - docker build
+        -f ui/Dockerfile
+        --build-arg BUILD_SHA="$CI_COMMIT_SHORT_SHA"
+        -t "$IMAGE:$CI_COMMIT_SHORT_SHA"
+        -t "$IMAGE:latest"
+        ui/
+    - docker push "$IMAGE:$CI_COMMIT_SHORT_SHA"
+    - docker push "$IMAGE:latest"
+
+# ---------------------------------------------------------------------------
+# Terraform plan (informational — no apply in CI)
+# ---------------------------------------------------------------------------
+terraform-plan:
+  stage: terraform
+  image: hashicorp/terraform:1.8
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - Terraform/**/*
+  before_script:
+    - cd Terraform
+    - echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+    - export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
+  script:
+    - terraform init -input=false
+    - terraform plan -input=false -var-file=terraform.tfvars
+  after_script:
+    - rm -f /tmp/gcp-sa-key.json

@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevOps Reports</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f3f4f6;
+      color: #111827;
+      padding: 2rem 1rem;
+    }
+
+    .container { max-width: 860px; margin: 0 auto; }
+
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .subtitle { color: #6b7280; font-size: 0.875rem; margin-bottom: 2rem; }
+
+    h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: #374151; }
+
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: #374151;
+      margin-top: 1rem;
+      margin-bottom: 0.25rem;
+    }
+    label.required::after { content: " *"; color: #ef4444; }
+
+    input[type="text"], select {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      color: #111827;
+      background: #fff;
+    }
+    input[type="text"]:focus, select:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+    }
+
+    button#run-btn {
+      margin-top: 1.25rem;
+      padding: 0.6rem 1.5rem;
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button#run-btn:hover:not(:disabled) { background: #4f46e5; }
+    button#run-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+
+    /* Status banner */
+    .status-box {
+      margin-top: 1rem;
+      padding: 0.875rem 1rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      line-height: 1.6;
+    }
+    .status-box.hidden  { display: none; }
+    .status-box.running  { background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; }
+    .status-box.succeeded { background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d; }
+    .status-box.failed   { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+    thead th {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 2px solid #e5e7eb;
+      color: #6b7280;
+      font-weight: 500;
+    }
+    tbody td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #f3f4f6; }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .badge {
+      display: inline-block;
+      padding: 0.125rem 0.625rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .badge.succeeded { background: #dcfce7; color: #15803d; }
+    .badge.failed    { background: #fee2e2; color: #b91c1c; }
+    .badge.running   { background: #dbeafe; color: #1d4ed8; }
+    .badge.unknown   { background: #f3f4f6; color: #6b7280; }
+
+    a { color: #6366f1; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-family: monospace; font-size: 0.8125rem; }
+
+    .spinner {
+      display: inline-block;
+      width: 0.75rem; height: 0.75rem;
+      border: 2px solid #93c5fd;
+      border-top-color: #1d4ed8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 0.4rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>DevOps Reports</h1>
+  <p class="subtitle">Trigger and monitor governance and drift reports.</p>
+
+  <!-- Run a report -->
+  <div class="card">
+    <h2>Run a report</h2>
+
+    <label for="report-select">Report type</label>
+    <select id="report-select">
+      <option value="">— select a report —</option>
+    </select>
+
+    <form id="param-form" style="display:none">
+      <div id="param-fields"></div>
+      <button type="submit" id="run-btn">Run report</button>
+    </form>
+
+    <div id="status-box" class="status-box hidden"></div>
+  </div>
+
+  <!-- Recent executions -->
+  <div class="card">
+    <h2>Recent executions</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Report</th>
+          <th>Started (UTC)</th>
+          <th>Status</th>
+          <th>Execution ID</th>
+          <th>Output</th>
+        </tr>
+      </thead>
+      <tbody id="exec-tbody">
+        <tr><td colspan="5" style="color:#9ca3af;padding:1rem 0.75rem">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+let REPORTS = {};
+let pollTimer = null;
+let activeReportKey = null;
+
+const LS_PREFIX = 'devops_reports_inflight_';
+
+// ---------------------------------------------------------------------------
+// Bootstrap
+// ---------------------------------------------------------------------------
+async function init() {
+  try {
+    const res = await fetch('/api/reports');
+    REPORTS = await res.json();
+
+    const sel = document.getElementById('report-select');
+    for (const [key, meta] of Object.entries(REPORTS)) {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = meta.label;
+      sel.appendChild(opt);
+    }
+  } catch (e) {
+    showStatus('failed', 'Could not load report metadata from server.');
+    return;
+  }
+
+  await refreshExecutions();
+
+  // Resume any in-flight execution that was in progress when the page was last closed.
+  // Discard entries older than 1 hour (max Cloud Run Job execution time).
+  const MAX_INFLIGHT_MS = 60 * 60 * 1000;
+  for (const key of Object.keys(REPORTS)) {
+    const raw = localStorage.getItem(LS_PREFIX + key);
+    if (!raw) continue;
+    let entry;
+    try { entry = JSON.parse(raw); } catch { localStorage.removeItem(LS_PREFIX + key); continue; }
+    if (!entry.name || (Date.now() - (entry.since || 0)) > MAX_INFLIGHT_MS) {
+      localStorage.removeItem(LS_PREFIX + key);
+      continue;
+    }
+    activeReportKey = key;
+    showStatus('running',
+      `<span class="spinner"></span>Resuming polling for <code>${shortId(entry.name)}</code>…`
+    );
+    startPolling(entry.name);
+    break; // one at a time
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Report selection → render parameter form
+// ---------------------------------------------------------------------------
+document.getElementById('report-select').addEventListener('change', function () {
+  const key = this.value;
+  resetStatus();
+  stopPolling();
+  activeReportKey = key || null;
+
+  const form = document.getElementById('param-form');
+  const fields = document.getElementById('param-fields');
+  fields.innerHTML = '';
+
+  if (!key) { form.style.display = 'none'; return; }
+
+  const params = REPORTS[key].parameters;
+  for (const [name, def] of Object.entries(params)) {
+    const label = document.createElement('label');
+    label.textContent = humanise(name);
+    label.htmlFor = `p-${name}`;
+    if (def.required) label.classList.add('required');
+    fields.appendChild(label);
+
+    let input;
+    if (def.type === 'enum') {
+      input = document.createElement('select');
+      for (const opt of def.options) {
+        const o = document.createElement('option');
+        o.value = opt;
+        o.textContent = opt;
+        if (opt === def.default) o.selected = true;
+        input.appendChild(o);
+      }
+    } else {
+      input = document.createElement('input');
+      input.type = 'text';
+      const dflt = def.default === '<today>'
+        ? new Date().toISOString().slice(0, 10)
+        : (def.default || '');
+      input.value = dflt;
+      if (def.required) input.required = true;
+    }
+    input.id = `p-${name}`;
+    input.name = name;
+    fields.appendChild(input);
+  }
+
+  form.style.display = 'block';
+  document.getElementById('run-btn').disabled = false;
+});
+
+// ---------------------------------------------------------------------------
+// Form submit → POST /api/executions
+// ---------------------------------------------------------------------------
+document.getElementById('param-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  stopPolling();
+
+  const reportKey = document.getElementById('report-select').value;
+  activeReportKey = reportKey;
+  const parameters = {};
+  for (const name of Object.keys(REPORTS[reportKey].parameters)) {
+    const el = document.getElementById(`p-${name}`);
+    if (el) parameters[name] = el.value;
+  }
+
+  document.getElementById('run-btn').disabled = true;
+  showStatus('running', '<span class="spinner"></span>Triggering Cloud Run Job…');
+
+  try {
+    const res = await fetch('/api/executions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report_type: reportKey, parameters }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      showStatus('failed', `Error: ${data.detail || 'Unknown error'}`);
+      document.getElementById('run-btn').disabled = false;
+      return;
+    }
+
+    showStatus('running',
+      `<span class="spinner"></span>Job submitted — <code>${shortId(data.execution_name)}</code>. Polling for status…`
+    );
+    localStorage.setItem(LS_PREFIX + reportKey, JSON.stringify({ name: data.execution_name, since: Date.now() }));
+    startPolling(data.execution_name);
+
+  } catch (err) {
+    showStatus('failed', `Network error: ${err.message}`);
+    document.getElementById('run-btn').disabled = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Polling — GET /api/executions/status?name=...
+// ---------------------------------------------------------------------------
+function startPolling(executionName) {
+  stopPolling();
+  pollTimer = setInterval(() => pollOnce(executionName), 6000);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function pollOnce(executionName) {
+  try {
+    const url = `/api/executions/status?name=${encodeURIComponent(executionName)}`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    if (data.status === 'running') return;
+
+    stopPolling();
+    if (activeReportKey) localStorage.removeItem(LS_PREFIX + activeReportKey);
+    document.getElementById('run-btn').disabled = false;
+
+    if (data.status === 'failed') {
+      showStatus('failed',
+        `Execution <code>${shortId(executionName)}</code> failed.<br>` +
+        `Check Cloud Run → Jobs for detailed logs.`
+      );
+    } else {
+      let msg = `Execution <code>${shortId(executionName)}</code> succeeded.`;
+      if (data.execution_id) {
+        msg += `<br>Execution ID: <code>${data.execution_id}</code>`;
+      }
+      if (data.gcs_url) {
+        msg += `<br><a href="${data.gcs_url}" target="_blank" rel="noopener">View output in GCS Console →</a>`;
+      }
+      showStatus('succeeded', msg);
+    }
+
+    await refreshExecutions();
+  } catch (_) { /* network blip — retry next tick */ }
+}
+
+// ---------------------------------------------------------------------------
+// Recent executions — GET /api/executions
+// ---------------------------------------------------------------------------
+async function refreshExecutions() {
+  const tbody = document.getElementById('exec-tbody');
+  try {
+    const res = await fetch('/api/executions');
+    const rows = await res.json();
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:#9ca3af;padding:1rem 0.75rem">No executions yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(r => {
+      const ts = r.execution_ts
+        ? new Date(r.execution_ts).toLocaleString('en-GB', { timeZone: 'UTC', hour12: false })
+        : '—';
+      const badge = r.status || 'unknown';
+      const shortExecId = r.execution_id ? r.execution_id.slice(0, 8) + '…' : '—';
+      const gcsCell = r.gcs_path
+        ? `<a href="https://console.cloud.google.com/storage/browser/${r.gcs_path.replace(/^gs:\/\//, '')}" target="_blank" rel="noopener">GCS →</a>`
+        : '—';
+      return `<tr>
+        <td>${r.report_type || '—'}</td>
+        <td>${ts}</td>
+        <td><span class="badge ${badge}">${badge}</span></td>
+        <td><code title="${r.execution_id || ''}">${shortExecId}</code></td>
+        <td>${gcsCell}</td>
+      </tr>`;
+    }).join('');
+  } catch (_) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:#9ca3af">Could not load executions.</td></tr>';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UI helpers
+// ---------------------------------------------------------------------------
+function showStatus(type, html) {
+  const box = document.getElementById('status-box');
+  box.className = `status-box ${type}`;
+  box.innerHTML = html;
+}
+
+function resetStatus() {
+  const box = document.getElementById('status-box');
+  box.className = 'status-box hidden';
+  box.innerHTML = '';
+}
+
+function shortId(name) {
+  return name ? name.split('/').pop() : name;
+}
+
+function humanise(name) {
+  return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+init();
+</script>
+</body>
+</html>

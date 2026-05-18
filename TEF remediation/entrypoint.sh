@@ -1,6 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+# JSON logging helper — outputs Cloud Logging-compatible JSON to stdout.
+log_json() {
+  local severity="$1"
+  local message="$2"
+  printf '{"severity":"%s","message":"%s"}\n' "$severity" "$message"
+}
+
 # Auto-generate EXECUTION_ID if not supplied by the caller.
 # Uses Python's uuid module — no dependency on uuidgen (not in python:3.11-slim).
 if [[ -z "${EXECUTION_ID:-}" ]]; then
@@ -10,8 +17,8 @@ fi
 
 REPORT_TYPE="${1:-}"
 if [[ -z "$REPORT_TYPE" ]]; then
-    echo "Usage: run-report <report_type> [args...]"
-    echo "Valid report types: orphan_datasets, env_drift, commit_drift, file_drift"
+    log_json "ERROR" "Usage: run-report <report_type> [args...]"
+    log_json "ERROR" "Valid report types: orphan_datasets, env_drift, commit_drift, file_drift"
     exit 1
 fi
 shift
@@ -28,7 +35,7 @@ clone_repos() {
     local gitlab_base_url="$2"
 
     mkdir -p "$workspace_root"
-    echo "[run-report] Cloning group repos to $workspace_root ..."
+    log_json "INFO" "Cloning group repos to $workspace_root"
     python3 "$SCRIPTS_DIR/clone_fastoss_b.py" \
         --target-dir "$workspace_root" \
         --gitlab-base-url "$gitlab_base_url" \
@@ -62,30 +69,33 @@ case "$REPORT_TYPE" in
 
         SUBGROUP_ROOT="$WORKSPACE_ROOT/$SUBGROUP"
         if [[ ! -d "$SUBGROUP_ROOT" ]]; then
-            echo "[run-report] ERROR: subgroup directory not found after clone: $SUBGROUP_ROOT"
+            log_json "ERROR" "Subgroup directory not found after clone: $SUBGROUP_ROOT"
             exit 1
         fi
 
-        echo "[run-report] Phase 2: running env_drift for each repo in $SUBGROUP_ROOT ..."
+        log_json "INFO" "Phase 2: running env_drift for each repo in $SUBGROUP_ROOT"
         FAILED=0
         for repo_path in "$SUBGROUP_ROOT"/*/; do
             [[ -d "$repo_path/.git" ]] || continue
             project_name=$(basename "$repo_path")
-            echo "[run-report] --- $project_name ---"
+            # Fresh EXECUTION_ID per repo so each product gets its own audit row.
+            EXECUTION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+            export EXECUTION_ID
+            log_json "INFO" "env_drift: $project_name (execution_id=$EXECUTION_ID)"
             python3 "$SCRIPTS_DIR/generate_code_environment_drift_report.py" \
                 --project-name "$project_name" \
                 --repo-path "$repo_path" \
                 "$@" || {
-                echo "[run-report] WARNING: env_drift failed for $project_name"
+                log_json "WARNING" "env_drift failed for $project_name"
                 FAILED=$((FAILED + 1))
             }
         done
 
         if [[ $FAILED -gt 0 ]]; then
-            echo "[run-report] $FAILED repo(s) failed. See above for details."
+            log_json "ERROR" "$FAILED repo(s) failed in env_drift"
             exit 1
         fi
-        echo "[run-report] env_drift completed for all repos in $SUBGROUP."
+        log_json "INFO" "env_drift completed for all repos in $SUBGROUP"
         ;;
 
     commit_drift)
@@ -113,8 +123,7 @@ case "$REPORT_TYPE" in
         ;;
 
     *)
-        echo "Unknown report type: '$REPORT_TYPE'"
-        echo "Valid types: orphan_datasets, env_drift, commit_drift, file_drift"
+        log_json "ERROR" "Unknown report type: $REPORT_TYPE. Valid types: orphan_datasets, env_drift, commit_drift, file_drift"
         exit 1
         ;;
 esac

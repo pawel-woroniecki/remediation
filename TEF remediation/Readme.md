@@ -68,6 +68,7 @@ A cloud-native reporting framework that detects drift and governance gaps across
 TEF remediation/
 ├── Dockerfile.python                        # Single image for all 4 reports
 ├── entrypoint.sh                            # Routes report type → script
+├── .gitlab-ci.yml                           # CI: build Docker images + Terraform plan
 ├── requirements.txt                         # Python dependencies
 │
 ├── clone_all_groups_repo/
@@ -123,12 +124,15 @@ gcloud secrets versions add gitlab-token \
 
 ### 3. Build and push the Docker image
 
-```bash
-docker build -f Dockerfile.python -t \
-  europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:latest .
+Tag with the current git commit SHA so deployments are traceable:
 
-docker push \
-  europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:latest
+```bash
+SHA=$(git rev-parse --short HEAD)
+IMAGE=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports
+
+docker build -f Dockerfile.python --build-arg BUILD_SHA=$SHA -t $IMAGE:$SHA -t $IMAGE:latest .
+docker push $IMAGE:$SHA
+docker push $IMAGE:latest
 ```
 
 ### 4. Create the Looker BigQuery key (manual — cannot be done in Terraform)
@@ -155,15 +159,16 @@ gcloud run jobs execute devops-reports-commit-drift \
 
 All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`.
 
-| Table | Purpose |
+| Table / View | Purpose |
 |---|---|
-| `executions` | One row per job run — audit trail |
+| `executions` | One row per job run: `triggered_by`, `duration_seconds`, `status`, `gcs_path` (link to GCS output) |
 | `branch_drift_kpis` | Commit/file drift counts per repo × direction |
 | `branch_drift_evidence` | Individual commits/files driving the drift |
 | `env_drift_findings` | Code vs environment discrepancies |
 | `orphan_datasets` | Unowned BigQuery datasets |
 | `orphan_dataset_objects` | Objects inside orphan datasets |
 | `entities` | Reference catalogue |
+| `execution_daily_summary` *(view)* | Daily success/failure rates per report type — connect directly to Looker Studio |
 
 ---
 

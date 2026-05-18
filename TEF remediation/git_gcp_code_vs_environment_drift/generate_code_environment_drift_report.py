@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 import base64
 from collections import defaultdict
@@ -25,6 +26,10 @@ DEFAULT_CURL = "curl"
 TEXT_SUFFIXES = {".sql", ".yml", ".yaml", ".py", ".txt", ".md", ".json"}
 
 REPORTS_GCS_BUCKET_DEFAULT = "to-be-added-later"
+
+
+def log(severity: str, message: str, **extra) -> None:
+    print(json.dumps({"severity": severity, "message": message, **extra}, default=str), flush=True)
 
 
 @dataclass
@@ -424,110 +429,22 @@ def collect_source_files(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
     return files
 
 
-def gcloud_access_token(gcloud_path: str) -> str:
-    return run_command([gcloud_path, "auth", "print-access-token"]).strip()
-
-
-
-
-def curl_json(curl_path: str, token: str, url: str) -> dict[str, Any]:
-    """Currently unused helper kept for future REST GET-based metadata lookups."""
-    output = run_command(
-        [
-            curl_path,
-            "-sS",
-            "-H",
-            f"Authorization: Bearer {token}",
-            url,
-        ]
-    )
-    return json.loads(output) if output.strip() else {}
-
-
-def curl_json_post(curl_path: str, token: str, url: str, payload: dict[str, Any]) -> dict[str, Any]:
-    output = run_command(
-        [
-            curl_path,
-            "-sS",
-            "-H",
-            f"Authorization: Bearer {token}",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            json.dumps(payload, separators=(",", ":")),
-            url,
-        ]
-    )
-    return json.loads(output) if output.strip() else {}
-
-
-def bigquery_query(curl_path: str, token: str, project_id: str, sql: str) -> list[dict[str, Any]]:
-    """Run a BigQuery Standard SQL query through REST and return rows as dictionaries."""
-    payload = {"query": sql, "useLegacySql": False}
-    response = curl_json_post(
-        curl_path,
-        token,
-        f"https://bigquery.googleapis.com/bigquery/v2/projects/{project_id}/queries",
-        payload,
-    )
-    fields = response.get("schema", {}).get("fields", [])
-    rows = response.get("rows", [])
-    parsed: list[dict[str, Any]] = []
-    for row in rows:
-        values = row.get("f", [])
-        item: dict[str, Any] = {}
-        for field, value in zip(fields, values):
-            item[field["name"]] = value.get("v")
-        parsed.append(item)
-    return parsed
-
-
 def fetch_bigquery_inventory(
-    curl_path: str,
-    gcloud_path: str,
     project_id: str,
     datasets: list[str],
 ) -> dict[str, dict[str, Any]]:
-    """Fetch BigQuery metadata for the selected target project through INFORMATION_SCHEMA views."""
-    token = gcloud_access_token(gcloud_path)
+    """Fetch BigQuery metadata for the selected target project via INFORMATION_SCHEMA views."""
+    bq = bigquery.Client(project=project_id)
     inventory: dict[str, dict[str, Any]] = {}
+
+    def _q(sql: str) -> list[dict[str, Any]]:
+        return [dict(row) for row in bq.query(sql).result()]
+
     for dataset in datasets:
-        table_rows = bigquery_query(
-            curl_path,
-            token,
-            project_id,
-            f"""
-            SELECT table_name, table_type, ddl
-            FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.TABLES
-            """.strip(),
-        )
-        column_rows = bigquery_query(
-            curl_path,
-            token,
-            project_id,
-            f"""
-            SELECT table_name, column_name, data_type
-            FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.COLUMNS
-            """.strip(),
-        )
-        routine_rows = bigquery_query(
-            curl_path,
-            token,
-            project_id,
-            f"""
-            SELECT routine_name, routine_type, routine_definition
-            FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.ROUTINES
-            """.strip(),
-        )
-        view_rows = bigquery_query(
-            curl_path,
-            token,
-            project_id,
-            f"""
-            SELECT table_name, view_definition
-            FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.VIEWS
-            """.strip(),
-        )
+        table_rows   = _q(f"SELECT table_name, table_type, ddl FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.TABLES")
+        column_rows  = _q(f"SELECT table_name, column_name, data_type FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.COLUMNS")
+        routine_rows = _q(f"SELECT routine_name, routine_type, routine_definition FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.ROUTINES")
+        view_rows    = _q(f"SELECT table_name, view_definition FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.VIEWS")
 
         for row in table_rows:
             inventory[row["table_name"]] = {
@@ -818,19 +735,15 @@ def upload_to_gcs(
     local_dir: Path,
 ) -> None:
     if bucket_name == REPORTS_GCS_BUCKET_DEFAULT:
-        print(f"[upload] GCS upload skipped: --reports-gcs-bucket not configured.")
-        return
-    try:
-        gcs_client = storage.Client()
-        bucket = gcs_client.bucket(bucket_name)
-        for local_file in sorted(local_dir.iterdir()):
-            if not local_file.is_file():
-                continue
-            blob_name = f"{gcs_prefix}/{execution_id}/{local_dir.name}/{local_file.name}"
-            bucket.blob(blob_name).upload_from_filename(str(local_file))
-            print(f"[upload] → gs://{bucket_name}/{blob_name}")
-    except Exception as exc:
-        print(f"[upload] WARNING: GCS upload failed: {exc}")
+        raise ValueError("--reports-gcs-bucket is required; no GCS upload target configured.")
+    gcs_client = storage.Client()
+    bucket = gcs_client.bucket(bucket_name)
+    for local_file in sorted(local_dir.iterdir()):
+        if not local_file.is_file():
+            continue
+        blob_name = f"{gcs_prefix}/{execution_id}/{local_dir.name}/{local_file.name}"
+        bucket.blob(blob_name).upload_from_filename(str(local_file))
+        log("INFO", "File uploaded to GCS", uri=f"gs://{bucket_name}/{blob_name}")
 
 
 def write_to_bigquery(
@@ -844,6 +757,18 @@ def write_to_bigquery(
     errors = client.insert_rows_json(table_id, rows)
     if errors:
         raise RuntimeError(f"BigQuery insert errors: {errors}")
+
+
+def execution_id_exists(client: bigquery.Client, table_id: str, eid: str) -> bool:
+    """Return True if this execution_id is already present — signals a Cloud Run retry."""
+    rows = list(client.query(
+        f"SELECT 1 FROM `{table_id}` WHERE execution_id = @eid AND execution_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 DAY) LIMIT 1",
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("eid", "STRING", eid)]
+        ),
+    ).result())
+    return len(rows) > 0
+
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1009,9 +934,12 @@ def main() -> int:
     """Run the full discrepancy workflow for one data product."""
     status = "success"
     bq_client = None
+    gcs_path: str | None = None
     execution_id = os.environ.get("EXECUTION_ID")
     if not execution_id:
         raise ValueError("EXECUTION_ID environment variable must be set")
+    triggered_by = os.environ.get("TRIGGERED_BY", "ui")
+    start_time = time.monotonic()
     args = parse_args()
     # Resolve before try so the except handler can always reference it.
     reporting_project = args.reporting_project or args.gcp_project
@@ -1080,8 +1008,6 @@ def main() -> int:
         gcs_findings = compare_gcs(source_files, actual_gcs)
         if resolved_datasets:
             actual_bq = fetch_bigquery_inventory(
-                args.curl_path,
-                args.gcloud_path,
                 args.gcp_project,
                 resolved_datasets,
             )
@@ -1118,8 +1044,39 @@ def main() -> int:
             "reporting_project": reporting_project,
         }
 
-        # Write findings before the execution record so a failure here is
-        # still captured as status=failed in the except block.
+        write_csv(report_root / "bigquery_findings.csv", bq_findings)
+        write_csv(report_root / "gcs_findings.csv", gcs_findings)
+        write_json(
+            report_root / "inventory_snapshot.json",
+            {
+                "summary": summary,
+                "source_bq": {name: vars(obj) for name, obj in source_bq.items()},
+                "source_dbt": source_dbt,
+                "source_dags": source_dags,
+                "source_files": source_files,
+                "actual_bq": actual_bq,
+                "actual_gcs": actual_gcs,
+                "execution_id": execution_id,
+            },
+        )
+        write_markdown(
+            report_root / "report.md", args, summary,
+            bq_findings, gcs_findings, source_dags, source_bq, source_dbt,
+        )
+
+        upload_to_gcs(args.reports_gcs_bucket, args.reports_gcs_prefix, execution_id, report_root)
+        gcs_path = f"gs://{args.reports_gcs_bucket}/{args.reports_gcs_prefix}/{execution_id}/"
+
+        # Dedup guard — skips BQ writes if this execution_id is already present.
+        # Defense-in-depth against accidental duplicate runs with the same ID.
+        if execution_id_exists(bq_client, f"{reporting_project}.devops_reports.executions", execution_id):
+            log("WARNING", "Execution already recorded — skipping BQ writes", execution_id=execution_id)
+            return 0
+
+        duration_seconds = int(time.monotonic() - start_time)
+
+        # Write BQ after GCS so every row has a gcs_path and any BQ failure
+        # is captured as status=failed in the except block.
         write_to_bigquery(
             bq_client,
             f"{reporting_project}.devops_reports.env_drift_findings",
@@ -1166,38 +1123,17 @@ def main() -> int:
                 "environment": resolved_target_env,
                 "git_ref": args.git_ref if args.source_mode == "branch" else None,
                 "source_mode": args.source_mode,
-                "triggered_by": "ui",
+                "triggered_by": triggered_by,
                 "status": status,
+                "duration_seconds": duration_seconds,
+                "gcs_path": gcs_path,
             }],
         )
-
-        write_csv(report_root / "bigquery_findings.csv", bq_findings)
-        write_csv(report_root / "gcs_findings.csv", gcs_findings)
-        write_json(
-            report_root / "inventory_snapshot.json",
-            {
-                "summary": summary,
-                "source_bq": {name: vars(obj) for name, obj in source_bq.items()},
-                "source_dbt": source_dbt,
-                "source_dags": source_dags,
-                "source_files": source_files,
-                "actual_bq": actual_bq,
-                "actual_gcs": actual_gcs,
-                "execution_id": execution_id,
-            },
-        )
-        write_markdown(
-            report_root / "report.md", args, summary,
-            bq_findings, gcs_findings, source_dags, source_bq, source_dbt,
-        )
-
-        upload_to_gcs(args.reports_gcs_bucket, args.reports_gcs_prefix, execution_id, report_root)
 
         if args.keep_workdir:
             shutil.copytree(snapshot_dir, report_root / "rendered_source_snapshot", dirs_exist_ok=True)
 
-        print(f"Report written to: {report_root}")
-        print(json.dumps(summary, indent=2))
+        log("INFO", "Report complete", path=str(report_root), **summary)
         return 0
 
     except Exception:
@@ -1215,8 +1151,10 @@ def main() -> int:
                     "environment": "prod",
                     "git_ref": args.git_ref if args.source_mode == "branch" else None,
                     "source_mode": args.source_mode,
-                    "triggered_by": "ui",
-                    "status": status,
+                    "triggered_by": triggered_by,
+                    "status": "failed",
+                    "duration_seconds": int(time.monotonic() - start_time),
+                    "gcs_path": gcs_path,
                 }],
             )
         raise

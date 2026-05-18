@@ -12,16 +12,14 @@
 # ---------------------------------------------------------------------------
 
 locals {
-  runner_sa   = google_service_account.reports_runner.email
-  reports_job_defaults = {
-    region      = var.region
-    project     = var.project_id
-    image       = var.container_image
-    memory      = "2Gi"
-    cpu         = "1"
-    timeout     = "3600s"
-    max_retries = 1
-  }
+  runner_sa       = google_service_account.reports_runner.email
+  job_region      = var.region
+  job_project     = var.project_id
+  job_image       = var.container_image
+  job_memory      = "2Gi"
+  job_cpu         = "1"
+  job_timeout     = "3600s"
+  job_max_retries = 0
 }
 
 # ---------------------------------------------------------------------------
@@ -29,36 +27,49 @@ locals {
 # ---------------------------------------------------------------------------
 resource "google_cloud_run_v2_job" "orphan_datasets" {
   name     = "devops-reports-orphan-datasets"
-  location = local.reports_job_defaults.region
-  project  = local.reports_job_defaults.project
+  location = local.job_region
+  project  = local.job_project
 
   depends_on = [google_project_service.run]
 
   template {
     template {
       service_account = local.runner_sa
-      timeout         = local.reports_job_defaults.timeout
-      max_retries     = local.reports_job_defaults.max_retries
+      timeout         = local.job_timeout
+      max_retries     = local.job_max_retries
 
       containers {
-        image = local.reports_job_defaults.image
+        image = local.job_image
 
         args = [
           "orphan_datasets",
-          "--gcp-project",        var.project_id,
-          "--reporting-project",  var.reporting_project_id,
-          "--gcs-bucket",         var.reports_gcs_bucket,
+          "--project-id",        var.bq_scan_project_id,
+          "--gcp-project",       var.project_id,
+          "--reporting-project", var.reporting_project_id,
+          "--gcs-bucket",        var.reports_gcs_bucket,
         ]
 
-        env { name = "GCP_PROJECT";            value = var.project_id }
-        env { name = "GITLAB_BASE_URL";        value = var.gitlab_base_url }
-        env { name = "GITLAB_TOKEN_SECRET_ID"; value = var.gitlab_token_secret_id }
-        env { name = "SUBGROUP";               value = var.gitlab_subgroup }
+        env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+        env {
+          name  = "GITLAB_TOKEN_SECRET_ID"
+          value = var.gitlab_token_secret_id
+        }
+        env {
+          name  = "SUBGROUP"
+          value = var.gitlab_subgroup
+        }
 
         resources {
           limits = {
-            memory = local.reports_job_defaults.memory
-            cpu    = local.reports_job_defaults.cpu
+            memory = local.job_memory
+            cpu    = local.job_cpu
           }
         }
       }
@@ -79,36 +90,48 @@ resource "google_cloud_run_v2_job" "orphan_datasets" {
 # ---------------------------------------------------------------------------
 resource "google_cloud_run_v2_job" "env_drift" {
   name     = "devops-reports-env-drift"
-  location = local.reports_job_defaults.region
-  project  = local.reports_job_defaults.project
+  location = local.job_region
+  project  = local.job_project
 
   depends_on = [google_project_service.run]
 
   template {
     template {
       service_account = local.runner_sa
-      timeout         = local.reports_job_defaults.timeout
-      max_retries     = local.reports_job_defaults.max_retries
+      timeout         = local.job_timeout
+      max_retries     = local.job_max_retries
 
       containers {
-        image = local.reports_job_defaults.image
+        image = local.job_image
 
         args = [
           "env_drift",
-          "--gcp-project",         var.project_id,
-          "--reporting-project",   var.reporting_project_id,
-          "--reports-gcs-bucket",  var.reports_gcs_bucket,
+          "--gcp-project",        var.project_id,
+          "--reporting-project",  var.reporting_project_id,
+          "--reports-gcs-bucket", var.reports_gcs_bucket,
         ]
 
-        env { name = "GCP_PROJECT";            value = var.project_id }
-        env { name = "GITLAB_BASE_URL";        value = var.gitlab_base_url }
-        env { name = "GITLAB_TOKEN_SECRET_ID"; value = var.gitlab_token_secret_id }
-        env { name = "SUBGROUP";               value = var.gitlab_subgroup }
+        env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+        env {
+          name  = "GITLAB_TOKEN_SECRET_ID"
+          value = var.gitlab_token_secret_id
+        }
+        env {
+          name  = "SUBGROUP"
+          value = var.gitlab_subgroup
+        }
 
         resources {
           limits = {
-            memory = local.reports_job_defaults.memory
-            cpu    = local.reports_job_defaults.cpu
+            memory = local.job_memory
+            cpu    = local.job_cpu
           }
         }
       }
@@ -129,19 +152,19 @@ resource "google_cloud_run_v2_job" "env_drift" {
 # ---------------------------------------------------------------------------
 resource "google_cloud_run_v2_job" "commit_drift" {
   name     = "devops-reports-commit-drift"
-  location = local.reports_job_defaults.region
-  project  = local.reports_job_defaults.project
+  location = local.job_region
+  project  = local.job_project
 
   depends_on = [google_project_service.run]
 
   template {
     template {
       service_account = local.runner_sa
-      timeout         = local.reports_job_defaults.timeout
-      max_retries     = local.reports_job_defaults.max_retries
+      timeout         = local.job_timeout
+      max_retries     = local.job_max_retries
 
       containers {
-        image = local.reports_job_defaults.image
+        image = local.job_image
 
         args = [
           "commit_drift",
@@ -150,15 +173,27 @@ resource "google_cloud_run_v2_job" "commit_drift" {
           "--gcs-bucket",        var.reports_gcs_bucket,
         ]
 
-        env { name = "GCP_PROJECT";            value = var.project_id }
-        env { name = "GITLAB_BASE_URL";        value = var.gitlab_base_url }
-        env { name = "GITLAB_TOKEN_SECRET_ID"; value = var.gitlab_token_secret_id }
-        env { name = "SUBGROUP";               value = var.gitlab_subgroup }
+        env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+        env {
+          name  = "GITLAB_TOKEN_SECRET_ID"
+          value = var.gitlab_token_secret_id
+        }
+        env {
+          name  = "SUBGROUP"
+          value = var.gitlab_subgroup
+        }
 
         resources {
           limits = {
-            memory = local.reports_job_defaults.memory
-            cpu    = local.reports_job_defaults.cpu
+            memory = local.job_memory
+            cpu    = local.job_cpu
           }
         }
       }
@@ -179,19 +214,19 @@ resource "google_cloud_run_v2_job" "commit_drift" {
 # ---------------------------------------------------------------------------
 resource "google_cloud_run_v2_job" "file_drift" {
   name     = "devops-reports-file-drift"
-  location = local.reports_job_defaults.region
-  project  = local.reports_job_defaults.project
+  location = local.job_region
+  project  = local.job_project
 
   depends_on = [google_project_service.run]
 
   template {
     template {
       service_account = local.runner_sa
-      timeout         = local.reports_job_defaults.timeout
-      max_retries     = local.reports_job_defaults.max_retries
+      timeout         = local.job_timeout
+      max_retries     = local.job_max_retries
 
       containers {
-        image = local.reports_job_defaults.image
+        image = local.job_image
 
         args = [
           "file_drift",
@@ -200,15 +235,27 @@ resource "google_cloud_run_v2_job" "file_drift" {
           "--gcs-bucket",        var.reports_gcs_bucket,
         ]
 
-        env { name = "GCP_PROJECT";            value = var.project_id }
-        env { name = "GITLAB_BASE_URL";        value = var.gitlab_base_url }
-        env { name = "GITLAB_TOKEN_SECRET_ID"; value = var.gitlab_token_secret_id }
-        env { name = "SUBGROUP";               value = var.gitlab_subgroup }
+        env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+        env {
+          name  = "GITLAB_TOKEN_SECRET_ID"
+          value = var.gitlab_token_secret_id
+        }
+        env {
+          name  = "SUBGROUP"
+          value = var.gitlab_subgroup
+        }
 
         resources {
           limits = {
-            memory = local.reports_job_defaults.memory
-            cpu    = local.reports_job_defaults.cpu
+            memory = local.job_memory
+            cpu    = local.job_cpu
           }
         }
       }

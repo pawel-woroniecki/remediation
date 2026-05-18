@@ -1,4 +1,6 @@
 FROM python:3.11-slim
+ARG BUILD_SHA=dev
+LABEL org.opencontainers.image.revision=$BUILD_SHA
 
 # Base system tools + prerequisites for gcloud and pwsh apt repos
 RUN apt-get update && apt-get install -y --no-install-recommends \

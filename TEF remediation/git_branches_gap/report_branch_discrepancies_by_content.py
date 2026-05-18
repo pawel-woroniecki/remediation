@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import subprocess
 import sys
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -52,8 +54,8 @@ def default_output_dir() -> str:
     return str(path.parents[2] / "outputs") if len(path.parents) > 2 else str(path.parent / "outputs")
 
 
-def log_step(message: str) -> None:
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}")
+def log(severity: str, message: str, **extra) -> None:
+    print(json.dumps({"severity": severity, "message": message, **extra}, default=str), flush=True)
 
 
 def has_remote_branch(repo_path: str, branch: str) -> bool:
@@ -240,6 +242,17 @@ def write_to_bigquery(
         raise RuntimeError(f"BigQuery streaming insert errors for {table_id}: {errors}")
 
 
+def execution_id_exists(client: bigquery.Client, table_id: str, eid: str) -> bool:
+    """Return True if this execution_id is already present — signals a Cloud Run retry."""
+    rows = list(client.query(
+        f"SELECT 1 FROM `{table_id}` WHERE execution_id = @eid AND execution_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 2 DAY) LIMIT 1",
+        job_config=bigquery.QueryJobConfig(
+            query_parameters=[bigquery.ScalarQueryParameter("eid", "STRING", eid)]
+        ),
+    ).result())
+    return len(rows) > 0
+
+
 def upload_to_gcs(
     bucket_name: str,
     gcs_prefix: str,
@@ -247,19 +260,15 @@ def upload_to_gcs(
     local_dir: Path,
 ) -> None:
     if bucket_name == GCS_BUCKET_DEFAULT:
-        log_step("GCS upload skipped: --gcs-bucket not configured.")
-        return
-    try:
-        gcs_client = storage.Client()
-        bucket = gcs_client.bucket(bucket_name)
-        for local_file in sorted(local_dir.iterdir()):
-            if not local_file.is_file():
-                continue
-            blob_name = f"{gcs_prefix}/{execution_id}/{local_dir.name}/{local_file.name}"
-            bucket.blob(blob_name).upload_from_filename(str(local_file))
-            log_step(f"  Uploaded → gs://{bucket_name}/{blob_name}")
-    except Exception as exc:
-        log_step(f"WARNING: GCS upload failed: {exc}")
+        raise ValueError("--gcs-bucket is required; no GCS upload target configured.")
+    gcs_client = storage.Client()
+    bucket = gcs_client.bucket(bucket_name)
+    for local_file in sorted(local_dir.iterdir()):
+        if not local_file.is_file():
+            continue
+        blob_name = f"{gcs_prefix}/{execution_id}/{local_dir.name}/{local_file.name}"
+        bucket.blob(blob_name).upload_from_filename(str(local_file))
+        log("INFO", "File uploaded to GCS", uri=f"gs://{bucket_name}/{blob_name}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -301,10 +310,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     status = "success"
     bq_client: bigquery.Client | None = None
+    gcs_path: str | None = None
 
     execution_id = os.environ.get("EXECUTION_ID")
     if not execution_id:
         raise ValueError("EXECUTION_ID environment variable must be set")
+    triggered_by = os.environ.get("TRIGGERED_BY", "ui")
+    start_time = time.monotonic()
 
     args = parse_args()
     reporting_project = args.reporting_project or args.gcp_project
@@ -319,13 +331,13 @@ def main() -> int:
         bq_client = bigquery.Client(project=reporting_project)
 
         repos = sorted(p for p in root.iterdir() if p.is_dir() and (p / ".git").exists())
-        log_step(f"Found {len(repos)} git repos under {root}")
-        log_step(f"Compare mode: {args.compare_mode}")
+        log("INFO", f"Found {len(repos)} git repos", root=str(root))
+        log("INFO", "Compare mode", mode=args.compare_mode)
 
         output_root = Path(args.output_dir).resolve()
         run_dir = output_root / f"file_drift_{args.date_tag}_{args.compare_mode}"
         run_dir.mkdir(parents=True, exist_ok=True)
-        log_step(f"Output directory: {run_dir}")
+        log("INFO", "Output directory", path=str(run_dir))
 
         file_count_rows: list[dict[str, Any]] = []
         all_detail_rows: list[dict[str, Any]] = []
@@ -344,7 +356,7 @@ def main() -> int:
 
         for repo_path in repos:
             repo = repo_path.name
-            log_step(f"Repo: {repo}")
+            log("INFO", "Processing repo", repo=repo)
             path_str = str(repo_path)
 
             has_master = has_remote_branch(path_str, "master")
@@ -487,7 +499,7 @@ def main() -> int:
             })
 
         # Write CSVs
-        log_step("Writing CSV files ...")
+        log("INFO", "Writing CSV files")
         write_csv(
             run_dir / f"file_counts_{args.date_tag}.csv",
             sorted(file_count_rows, key=lambda r: r["repo"]),
@@ -503,15 +515,26 @@ def main() -> int:
 
         # Upload CSVs to GCS
         upload_to_gcs(args.gcs_bucket, args.gcs_prefix, execution_id, run_dir)
+        gcs_path = f"gs://{args.gcs_bucket}/{args.gcs_prefix}/{execution_id}/"
+
+        # Dedup guard — skips BQ writes if this execution_id is already present.
+        # Defense-in-depth against accidental duplicate runs with the same ID.
+        if execution_id_exists(bq_client, f"{reporting_project}.devops_reports.executions", execution_id):
+            log("WARNING", "Execution already recorded — skipping BQ writes", execution_id=execution_id)
+            return 0
+
+        run_date = date.today().isoformat()
+        duration_seconds = int(time.monotonic() - start_time)
 
         # BigQuery: evidence → kpis → execution record
-        log_step("Writing to BigQuery ...")
+        log("INFO", "Writing to BigQuery")
         write_to_bigquery(
             bq_client,
             f"{reporting_project}.devops_reports.branch_drift_evidence",
             [
                 {
                     "execution_id": execution_id,
+                    "run_date": run_date,
                     "repo": r["repo"],
                     "drift_type": "content",
                     "discrepancy": r["discrepancy"],
@@ -528,7 +551,7 @@ def main() -> int:
         write_to_bigquery(
             bq_client,
             f"{reporting_project}.devops_reports.branch_drift_kpis",
-            kpi_rows,
+            [{**r, "run_date": run_date} for r in kpi_rows],
         )
         write_to_bigquery(
             bq_client,
@@ -540,13 +563,14 @@ def main() -> int:
                 "environment": "prod",
                 "git_ref": None,
                 "source_mode": "branch",
-                "triggered_by": "ui",
+                "triggered_by": triggered_by,
                 "status": status,
+                "duration_seconds": duration_seconds,
+                "gcs_path": gcs_path,
             }],
         )
 
-        log_step("Done.")
-        print(f"Report written to: {run_dir}")
+        log("INFO", "Done", path=str(run_dir))
         return 0
 
     except Exception:
@@ -563,8 +587,10 @@ def main() -> int:
                         "environment": "prod",
                         "git_ref": None,
                         "source_mode": "branch",
-                        "triggered_by": "ui",
+                        "triggered_by": triggered_by,
                         "status": "failed",
+                        "duration_seconds": int(time.monotonic() - start_time),
+                        "gcs_path": gcs_path,
                     }],
                 )
             except Exception:

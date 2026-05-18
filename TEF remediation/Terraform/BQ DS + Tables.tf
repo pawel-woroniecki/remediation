@@ -78,6 +78,23 @@ resource "google_project_iam_member" "reports_runner_bq_job_user" {
   member  = "serviceAccount:${google_service_account.reports_runner.email}"
 }
 
+# ---------------------------------------------------------------------------
+# BigQuery IAM — orphan dataset scan project
+# ---------------------------------------------------------------------------
+# The orphan_datasets report scans a separate BigQuery project (typically prod)
+# for datasets not referenced by any repo. The runner SA needs read access there.
+resource "google_project_iam_member" "reports_runner_scan_bq_viewer" {
+  project = var.bq_scan_project_id
+  role    = "roles/bigquery.dataViewer"
+  member  = "serviceAccount:${google_service_account.reports_runner.email}"
+}
+
+resource "google_project_iam_member" "reports_runner_scan_bq_job_user" {
+  project = var.bq_scan_project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.reports_runner.email}"
+}
+
 resource "google_bigquery_dataset" "devops_reports" {
   dataset_id = var.dataset_id
   project    = var.reporting_project_id
@@ -111,7 +128,8 @@ resource "google_bigquery_table" "executions" {
     { name = "source_mode", type = "STRING" },
     { name = "triggered_by", type = "STRING" },
     { name = "status", type = "STRING" },
-    { name = "duration_seconds", type = "INT64" }
+    { name = "duration_seconds", type = "INT64" },
+    { name = "gcs_path", type = "STRING" }
   ])
 
   time_partitioning {
@@ -142,6 +160,7 @@ resource "google_bigquery_table" "branch_drift_kpis" {
 
   schema = jsonencode([
     { name = "execution_id", type = "STRING", mode = "REQUIRED" },
+    { name = "run_date", type = "DATE" },
     { name = "repo", type = "STRING", mode = "REQUIRED" },
     { name = "left_branch", type = "STRING" },
     { name = "right_branch", type = "STRING" },
@@ -153,6 +172,11 @@ resource "google_bigquery_table" "branch_drift_kpis" {
     { name = "status", type = "STRING" }
   ])
 
+  time_partitioning {
+    type  = "DAY"
+    field = "run_date"
+  }
+
   clustering = ["repo", "drift_type"]
 }
 
@@ -163,6 +187,7 @@ resource "google_bigquery_table" "branch_drift_evidence" {
 
   schema = jsonencode([
     { name = "execution_id", type = "STRING", mode = "REQUIRED" },
+    { name = "run_date", type = "DATE" },
     { name = "repo", type = "STRING" },
     { name = "drift_type", type = "STRING" },
     { name = "discrepancy", type = "STRING" },
@@ -173,6 +198,11 @@ resource "google_bigquery_table" "branch_drift_evidence" {
     { name = "change_type", type = "STRING" },
     { name = "problem_statement", type = "STRING" }
   ])
+
+  time_partitioning {
+    type  = "DAY"
+    field = "run_date"
+  }
 
   clustering = ["repo", "discrepancy"]
 }
@@ -215,6 +245,34 @@ resource "google_bigquery_table" "orphan_datasets" {
   ])
 
   clustering = ["orphan_status"]
+}
+
+# ---------------------------------------------------------------------------
+# Looker Studio / Cloud Monitoring view — daily success/failure rates
+# ---------------------------------------------------------------------------
+# Connect this view directly to Looker Studio as a BigQuery data source:
+#   Looker Studio → Create → Data Source → BigQuery → Custom Query
+#   or select devops_reports.execution_daily_summary
+resource "google_bigquery_table" "execution_daily_summary" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "execution_daily_summary"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      SELECT
+        DATE(execution_ts)                                     AS execution_date,
+        report_type,
+        COUNTIF(status = 'success')                           AS success_count,
+        COUNTIF(status = 'failed')                            AS failure_count,
+        COUNT(*)                                              AS total_count,
+        SAFE_DIVIDE(COUNTIF(status = 'success'), COUNT(*))   AS success_rate
+      FROM `${var.reporting_project_id}.devops_reports.executions`
+      GROUP BY 1, 2
+    EOT
+    use_legacy_sql = false
+  }
 }
 
 resource "google_bigquery_table" "orphan_dataset_objects" {

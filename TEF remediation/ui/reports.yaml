@@ -1,0 +1,107 @@
+commit_drift:
+  label: "Commit-based branch drift"
+  cloud_run_job: "devops-reports-commit-drift"
+  gcs_prefix: "branch-drift/commit"
+  gcs_bucket_param: "gcs_bucket"
+  parameters:
+    gcp_project:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev-gke"
+      cli_flag: "--gcp-project"
+    reporting_project:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev"
+      cli_flag: "--reporting-project"
+    gcs_bucket:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev-gcs-devops-reports"
+      cli_flag: "--gcs-bucket"
+    date_tag:
+      type: string
+      required: false
+      default: "<today>"
+      cli_flag: "--date-tag"
+
+file_drift:
+  label: "File-content branch drift"
+  cloud_run_job: "devops-reports-file-drift"
+  gcs_prefix: "branch-drift/content"
+  gcs_bucket_param: "gcs_bucket"
+  parameters:
+    gcp_project:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev-gke"
+      cli_flag: "--gcp-project"
+    reporting_project:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev"
+      cli_flag: "--reporting-project"
+    gcs_bucket:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev-gcs-devops-reports"
+      cli_flag: "--gcs-bucket"
+    compare_mode:
+      type: enum
+      options: [merge_base, direct]
+      default: merge_base
+      cli_flag: "--compare-mode"
+
+env_drift:
+  label: "Environment vs code drift"
+  cloud_run_job: "devops-reports-env-drift"
+  gcs_prefix: "env-drift"
+  gcs_bucket_param: "reports_gcs_bucket"
+  parameters:
+    gcp_project:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev-gke"
+      cli_flag: "--gcp-project"
+    reporting_project:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev"
+      cli_flag: "--reporting-project"
+    reports_gcs_bucket:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev-gcs-devops-reports"
+      cli_flag: "--reports-gcs-bucket"
+
+orphan_datasets:
+  label: "Orphan BigQuery datasets"
+  cloud_run_job: "devops-reports-orphan-datasets"
+  gcs_prefix: "orphan-datasets"
+  gcs_bucket_param: "gcs_bucket"
+  parameters:
+    bq_scan_project:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-prod"
+      cli_flag: "--project-id"
+    gcp_project:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev-gke"
+      cli_flag: "--gcp-project"
+    reporting_project:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev"
+      cli_flag: "--reporting-project"
+    gcs_bucket:
+      type: string
+      required: true
+      default: "tefde-gcp-fastoss-dev-gcs-devops-reports"
+      cli_flag: "--gcs-bucket"
+    subgroup:
+      type: string
+      required: false
+      default: "ndl_core"
+      env_var: "SUBGROUP"
