@@ -1,6 +1,6 @@
 # DevOps Governance & Drift Reporting Framework
 
-A cloud-native reporting framework that detects drift and governance gaps across Git branches, GCP environments, and BigQuery datasets. All reports run as **Google Cloud Run Jobs**, write results to **BigQuery** and **GCS**, and are visualised in **Looker**.
+A cloud-native reporting framework that detects drift and governance gaps across Git branches, GCP environments, and BigQuery datasets. All reports run as **Google Cloud Run Jobs**, write results to **BigQuery** and **GCS**, and are visualised in **Looker Studio**.
 
 ---
 
@@ -19,7 +19,7 @@ A cloud-native reporting framework that detects drift and governance gaps across
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  UI / Cloud Scheduler                                   │
+│  UI (devops-reports-ui) / Cloud Scheduler               │
 └────────────────────┬────────────────────────────────────┘
                      │  trigger Cloud Run Job
                      ▼
@@ -30,6 +30,7 @@ A cloud-native reporting framework that detects drift and governance gaps across
 │  entrypoint.sh                                          │
 │    Phase 1: clone_fastoss_b.py  (all repos via GitLab)  │
 │    Phase 2: report script                               │
+│             (env_drift runs repos in parallel)          │
 └──────┬──────────────────────────────┬───────────────────┘
        │                              │
        ▼                              ▼
@@ -46,9 +47,10 @@ A cloud-native reporting framework that detects drift and governance gaps across
                            └──────────────┬────────────────┘
                                           │
                                           ▼
-                                    ┌──────────┐
-                                    │  Looker  │
-                                    └──────────┘
+                                  ┌─────────────────┐
+                                  │  Looker Studio  │
+                                  │  (viewer OAuth) │
+                                  └─────────────────┘
 ```
 
 ---
@@ -57,8 +59,9 @@ A cloud-native reporting framework that detects drift and governance gaps across
 
 | Resource | Project |
 |---|---|
-| Cloud Run Jobs, GCS, Secret Manager, Service Account, Artifact Registry | `tefde-gcp-fastoss-dev-gke` |
+| Cloud Run Jobs, UI Service, GCS, Secret Manager, Service Account, Artifact Registry | `tefde-gcp-fastoss-dev-gke` |
 | BigQuery dataset and tables | `tefde-gcp-fastoss-dev` |
+| BigQuery datasets scanned for orphans | `tefde-gcp-fastoss-prod` |
 
 ---
 
@@ -66,13 +69,14 @@ A cloud-native reporting framework that detects drift and governance gaps across
 
 ```
 TEF remediation/
-├── Dockerfile.python                        # Single image for all 4 reports
-├── entrypoint.sh                            # Routes report type → script
-├── .gitlab-ci.yml                           # CI: build Docker images + Terraform plan
+├── Dockerfile.python                        # Single image for all 4 Cloud Run Jobs
+├── entrypoint.sh                            # Routes report type → script; env_drift runs repos in parallel
+├── .gitlab-ci.yml                           # CI: build + Trivy scan + Terraform plan + GitLab release
+├── .gitignore                               # Excludes tfstate, SA key files, Python artefacts
 ├── requirements.txt                         # Python dependencies
 │
 ├── clone_all_groups_repo/
-│   ├── clone_fastoss_b.py                   # Clones all repos (reads PAT from Secret Manager)
+│   ├── clone_fastoss_b.py                   # Clones all repos (reads PAT from Secret Manager; redacts token from error logs)
 │   └── clone_fastoss_b.ps1                  # Local dev use only
 │
 ├── git_branches_gap/
@@ -81,7 +85,7 @@ TEF remediation/
 │   └── *.ps1                                      # Local dev scripts
 │
 ├── git_gcp_code_vs_environment_drift/
-│   └── generate_code_environment_drift_report.py  # Cloud Run: env drift
+│   └── generate_code_environment_drift_report.py  # Cloud Run: env drift (one execution per repo)
 │
 ├── bigquery_orphan_datasets/
 │   └── unmatched_bq_datasets_report.py            # Cloud Run: orphan datasets
@@ -92,13 +96,26 @@ TEF remediation/
 │   ├── env_drift_report.sql
 │   └── orphan_datasets_report.sql
 │
+├── ui/
+│   ├── main.py                              # FastAPI backend
+│   ├── reports.yaml                         # Declarative report + parameter metadata
+│   ├── static/index.html                    # Single-page frontend
+│   ├── requirements.txt                     # UI Python dependencies
+│   └── Dockerfile                           # UI container image
+│
+├── IAM_admin_instructions.md               # Manual IAM grant instructions for GCP admins
+│
 └── Terraform/
-    ├── BQ variables.tf       # Provider, all variables
-    ├── BQ DS + Tables.tf     # SA, Secret Manager, GCS, BigQuery, IAM
-    ├── Cloud Run Jobs.tf     # 4 Cloud Run Job resources
+    ├── BQ variables.tf       # All input variables
+    ├── BQ DS + Tables.tf     # SA, Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true)
+    ├── Cloud Run Jobs.tf     # 4 Cloud Run Job resources (VPC egress via connector)
+    ├── ui_service.tf         # UI Cloud Run Service + IAM (restricted to domain:telefonica.de)
     ├── artifact_registry.tf  # Artifact Registry repo + IAM
+    ├── networking.tf         # Dedicated VPC, subnet, VPC Access Connector, firewall rules
     ├── apis.tf               # GCP API enablement (both projects)
-    ├── looker.tf             # Looker read-only SA + BQ IAM
+    ├── looker.tf             # Comment only — Looker Studio needs no SA
+    ├── backend.tf            # Terraform state backend
+    ├── provider.tf           # Google provider configuration
     └── terraform.tfvars      # Values for all variables
 ```
 
@@ -106,15 +123,24 @@ TEF remediation/
 
 ## Deployment Steps
 
-### 1. Terraform apply
+### 1. Fill in required placeholder values in `terraform.tfvars`
+
+Before applying Terraform, set the GitLab network CIDR:
+
+```hcl
+gitlab_network_cidr = "10.x.x.x/xx"   # ask your network team
+```
+
+### 2. Terraform apply
 
 ```bash
 cd "TEF remediation/Terraform"
 terraform init
+terraform validate
 terraform apply
 ```
 
-### 2. Load the GitLab PAT into Secret Manager
+### 3. Load the GitLab PAT into Secret Manager
 
 ```bash
 gcloud secrets versions add gitlab-token \
@@ -122,18 +148,7 @@ gcloud secrets versions add gitlab-token \
   --data-file=- <<< "YOUR_GITLAB_PAT"
 ```
 
-### 3. Build and push the Docker image
-
-Tag with the current git commit SHA so deployments are traceable:
-
-```bash
-SHA=$(git rev-parse --short HEAD)
-IMAGE=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports
-
-docker build -f Dockerfile.python --build-arg BUILD_SHA=$SHA -t $IMAGE:$SHA -t $IMAGE:latest .
-docker push $IMAGE:$SHA
-docker push $IMAGE:latest
-```
+The PAT requires `read_api` and `read_repository` scopes. Prefer a **Group Access Token** over a Personal Access Token.
 
 ### 4. Create a key for `devops-reports-runner` (used by CI/CD to push images)
 
@@ -143,18 +158,36 @@ gcloud iam service-accounts keys create runner-key.json \
   --project=tefde-gcp-fastoss-dev-gke
 ```
 
-Add the contents of `runner-key.json` as the `GCP_SA_KEY` masked variable in GitLab CI/CD settings, then delete the local file.
+Add the contents of `runner-key.json` as the `GCP_SA_KEY` **masked** variable in GitLab CI/CD settings, then delete the local file. See `.gitlab-ci.yml` for the Workload Identity Federation upgrade path that eliminates this key.
 
-### 5. Connect Looker Studio to BigQuery
+### 5. Build and push the Docker images
 
-No service account key is required. In Looker Studio:
+Images are built automatically by the CI pipeline on every commit to the default branch. To build manually:
 
-1. Create → Data Source → BigQuery
+```bash
+SHA=$(git rev-parse --short HEAD)
+
+# Reports image
+IMAGE=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports
+docker build -f Dockerfile.python --build-arg BUILD_SHA=$SHA -t $IMAGE:$SHA -t $IMAGE:latest .
+docker push $IMAGE:$SHA && docker push $IMAGE:latest
+
+# UI image
+IMAGE=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui
+docker build -f ui/Dockerfile --build-arg BUILD_SHA=$SHA -t $IMAGE:$SHA -t $IMAGE:latest ui/
+docker push $IMAGE:$SHA && docker push $IMAGE:latest
+```
+
+### 6. Connect Looker Studio to BigQuery
+
+No service account key is required. Looker Studio uses the dashboard creator's own Google identity.
+
+1. Looker Studio → Create → Data Source → BigQuery
 2. Select project `tefde-gcp-fastoss-dev` → dataset `devops_reports`
 3. Choose a table (e.g. `execution_daily_summary`) or write a custom query using the SQL in `looker_sql/`
-4. Share the dashboard with your audience (domain, group, or specific users)
+4. Share the dashboard (access is controlled in Looker Studio, not GCP IAM)
 
-### 6. Run a report manually
+### 7. Run a report manually
 
 ```bash
 gcloud run jobs execute devops-reports-commit-drift \
@@ -164,13 +197,33 @@ gcloud run jobs execute devops-reports-commit-drift \
 
 ---
 
+## CI/CD Pipeline (`.gitlab-ci.yml`)
+
+| Stage | Job | Trigger |
+|---|---|---|
+| `build` | `build-reports` | Changes to `Dockerfile.python`, report scripts, or `entrypoint.sh` |
+| `build` | `build-ui` | Changes under `ui/` |
+| `terraform` | `terraform-plan` | Changes under `Terraform/` |
+| `release` | `create-release` | Tag push matching `v*` |
+
+Each build job runs a **Trivy** vulnerability scan between `docker build` and `docker push`. HIGH and CRITICAL CVEs block the push.
+
+To publish a release:
+```bash
+git tag -a v1.2.0 -m "Release v1.2.0: <summary>"
+git push origin v1.2.0
+```
+GitLab CI creates the release object automatically from the annotated tag message.
+
+---
+
 ## BigQuery Reporting Model
 
-All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`.
+All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`. All tables have `deletion_protection = true`.
 
 | Table / View | Purpose |
 |---|---|
-| `executions` | One row per job run: `triggered_by`, `duration_seconds`, `status`, `gcs_path` (link to GCS output) |
+| `executions` | One row per job run: `triggered_by`, `duration_seconds`, `status`, `gcs_path` |
 | `branch_drift_kpis` | Commit/file drift counts per repo × direction |
 | `branch_drift_evidence` | Individual commits/files driving the drift |
 | `env_drift_findings` | Code vs environment discrepancies |
@@ -181,10 +234,25 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`.
 
 ---
 
+## Service Account
+
+A single service account `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com` is used for:
+- Cloud Run Jobs runtime (Workload Identity — no key required)
+- UI Cloud Run Service runtime (Workload Identity)
+- CI/CD image pushes to Artifact Registry (JSON key stored as `GCP_SA_KEY` in GitLab CI)
+
+See `IAM_admin_instructions.md` for the full list of IAM grants required.
+
+---
+
 ## Security
 
-- No credentials baked into the Docker image
-- GitLab PAT stored in **GCP Secret Manager**, fetched at runtime
-- A single service account (`devops-reports-runner`) is used for Cloud Run Jobs, the UI Cloud Run Service, and CI/CD image pushes
-- Dashboards served via **Looker Studio** — viewers authenticate with their own Google identity, no service account key required
-- `EXECUTION_ID` is auto-generated by `entrypoint.sh` on every run using `uuidgen`
+- No credentials baked into Docker images
+- GitLab PAT stored in **GCP Secret Manager**, fetched at runtime; redacted from git subprocess error output before reaching Cloud Logging
+- Cloud Run Jobs and UI use **Workload Identity** — no long-lived credentials at runtime
+- UI access restricted to **`domain:telefonica.de`** Google Workspace accounts
+- Trivy scans for HIGH/CRITICAL CVEs on every image build, blocking push on findings
+- BigQuery tables protected with `deletion_protection = true`
+- Dedicated VPC with explicit-deny egress — only GitLab CIDR and Google APIs permitted
+- `EXECUTION_ID` dedup guard prevents double-writes on Cloud Run retries
+- `EXECUTION_ID` is auto-generated per run (UUID4 via Python)

@@ -42,7 +42,7 @@ All files are uploaded to `gs://<reports-gcs-bucket>/<reports-gcs-prefix>/<execu
 
 ### Inside Cloud Run (standard)
 
-Triggered automatically by `entrypoint.sh` as `env_drift` report type. Runs once per repo found under `$SUBGROUP_ROOT`.
+Triggered automatically by `entrypoint.sh` as `env_drift` report type. All repos under `$SUBGROUP_ROOT` are processed **in parallel** — each repo gets its own background subshell and a fresh `EXECUTION_ID`, writing an independent row to the `executions` table.
 
 ### Locally
 

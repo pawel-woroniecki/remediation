@@ -17,7 +17,7 @@ Two versions exist:
 
 1. Fetches the GitLab PAT from **GCP Secret Manager**
 2. Calls the GitLab REST API to enumerate all projects in the group
-3. Clones or fast-forward updates each non-archived repo using HTTPS
+3. Clones or fast-forward updates each non-archived repo using HTTPS — the PAT is embedded in the clone URL and stripped from the remote config after cloning; any git error output is redacted before reaching Cloud Logging
 4. Optionally writes a `fastoss_b.code-workspace` file for VS Code
 
 ### Prerequisites
