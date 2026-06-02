@@ -39,7 +39,8 @@ COPY entrypoint.sh /app/run-report
 RUN chmod +x /app/run-report
 
 # Default output location — override with --output-dir or OUTPUT_DIR env var.
-ENV OUTPUT_DIR=/workspace/outputs
+ENV OUTPUT_DIR=/workspace/outputs \
+    PYTHONUNBUFFERED=1
 
 # Run as non-root for defence-in-depth; workspace dir must be writable by this user.
 RUN groupadd --gid 1001 appuser && useradd --uid 1001 --gid 1001 --no-create-home appuser \
