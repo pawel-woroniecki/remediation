@@ -73,23 +73,39 @@ case "$REPORT_TYPE" in
             exit 1
         fi
 
-        log_json "INFO" "Phase 2: running env_drift for each repo in $SUBGROUP_ROOT"
-        FAILED=0
+        log_json "INFO" "Phase 2: running env_drift for each repo in $SUBGROUP_ROOT (parallel)"
+        WORK_TMPDIR=$(mktemp -d)
+        pids=()
+
         for repo_path in "$SUBGROUP_ROOT"/*/; do
             [[ -d "$repo_path/.git" ]] || continue
             project_name=$(basename "$repo_path")
-            # Fresh EXECUTION_ID per repo so each product gets its own audit row.
-            EXECUTION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
-            export EXECUTION_ID
-            log_json "INFO" "env_drift: $project_name (execution_id=$EXECUTION_ID)"
-            python3 "$SCRIPTS_DIR/generate_code_environment_drift_report.py" \
-                --project-name "$project_name" \
-                --repo-path "$repo_path" \
-                "$@" || {
-                log_json "WARNING" "env_drift failed for $project_name"
-                FAILED=$((FAILED + 1))
-            }
+            (
+                # Fresh EXECUTION_ID per repo so each product gets its own audit row.
+                EXECUTION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+                export EXECUTION_ID
+                log_json "INFO" "env_drift: $project_name (execution_id=$EXECUTION_ID)"
+                python3 "$SCRIPTS_DIR/generate_code_environment_drift_report.py" \
+                    --project-name "$project_name" \
+                    --repo-path "$repo_path" \
+                    "$@"
+                echo $? > "$WORK_TMPDIR/$project_name.exit"
+            ) &
+            pids+=($!)
         done
+
+        wait "${pids[@]}"
+
+        FAILED=0
+        for exit_file in "$WORK_TMPDIR"/*.exit; do
+            [[ -f "$exit_file" ]] || continue
+            code=$(cat "$exit_file")
+            if [[ "$code" != "0" ]]; then
+                log_json "WARNING" "env_drift failed for $(basename "$exit_file" .exit)"
+                FAILED=$((FAILED + 1))
+            fi
+        done
+        rm -rf "$WORK_TMPDIR"
 
         if [[ $FAILED -gt 0 ]]; then
             log_json "ERROR" "$FAILED repo(s) failed in env_drift"

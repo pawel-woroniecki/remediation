@@ -115,9 +115,10 @@ resource "google_bigquery_dataset" "devops_reports" {
 }
 
 resource "google_bigquery_table" "executions" {
-  project    = var.reporting_project_id
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "executions"
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "executions"
+  deletion_protection = true
 
   schema = jsonencode([
     { name = "execution_id", type = "STRING", mode = "REQUIRED" },
@@ -139,9 +140,10 @@ resource "google_bigquery_table" "executions" {
 }
 
 resource "google_bigquery_table" "entities" {
-  project    = var.reporting_project_id
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "entities"
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "entities"
+  deletion_protection = true
 
   schema = jsonencode([
     { name = "entity_id", type = "STRING", mode = "REQUIRED" },
@@ -154,9 +156,10 @@ resource "google_bigquery_table" "entities" {
 }
 
 resource "google_bigquery_table" "branch_drift_kpis" {
-  project    = var.reporting_project_id
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "branch_drift_kpis"
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "branch_drift_kpis"
+  deletion_protection = true
 
   schema = jsonencode([
     { name = "execution_id", type = "STRING", mode = "REQUIRED" },
@@ -181,9 +184,10 @@ resource "google_bigquery_table" "branch_drift_kpis" {
 }
 
 resource "google_bigquery_table" "branch_drift_evidence" {
-  project    = var.reporting_project_id
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "branch_drift_evidence"
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "branch_drift_evidence"
+  deletion_protection = true
 
   schema = jsonencode([
     { name = "execution_id", type = "STRING", mode = "REQUIRED" },
@@ -208,9 +212,10 @@ resource "google_bigquery_table" "branch_drift_evidence" {
 }
 
 resource "google_bigquery_table" "env_drift_findings" {
-  project    = var.reporting_project_id
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "env_drift_findings"
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "env_drift_findings"
+  deletion_protection = true
 
   schema = jsonencode([
     { name = "execution_id", type = "STRING", mode = "REQUIRED" },
@@ -228,9 +233,10 @@ resource "google_bigquery_table" "env_drift_findings" {
 }
 
 resource "google_bigquery_table" "orphan_datasets" {
-  project    = var.reporting_project_id
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "orphan_datasets"
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "orphan_datasets"
+  deletion_protection = true
 
   schema = jsonencode([
     { name = "execution_id", type = "STRING", mode = "REQUIRED" },
@@ -276,9 +282,10 @@ resource "google_bigquery_table" "execution_daily_summary" {
 }
 
 resource "google_bigquery_table" "orphan_dataset_objects" {
-  project    = var.reporting_project_id
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  table_id   = "orphan_dataset_objects"
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "orphan_dataset_objects"
+  deletion_protection = true
 
   schema = jsonencode([
     { name = "execution_id", type = "STRING", mode = "REQUIRED" },

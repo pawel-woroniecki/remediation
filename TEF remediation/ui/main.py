@@ -155,20 +155,23 @@ def trigger_execution(req: ExecutionRequest, request: Request):
     except Exception:
         pass
 
-    # Fallback: list executions and take the most recent one
+    # Fallback: list executions and take the most recent one.
+    # Retries with backoff because the execution may not be visible immediately.
     if not execution_name:
-        time.sleep(2)
-        try:
-            executions = list(
-                _execs.list_executions(
-                    request=run_v2.ListExecutionsRequest(parent=job_resource)
+        for attempt in range(3):
+            time.sleep(attempt + 1)  # 1s, 2s, 3s
+            try:
+                executions = list(
+                    _execs.list_executions(
+                        request=run_v2.ListExecutionsRequest(parent=job_resource)
+                    )
                 )
-            )
-            if executions:
-                executions.sort(key=lambda e: e.create_time, reverse=True)
-                execution_name = executions[0].name
-        except Exception:
-            pass
+                if executions:
+                    executions.sort(key=lambda e: e.create_time, reverse=True)
+                    execution_name = executions[0].name
+                    break
+            except Exception:
+                pass
 
     if not execution_name:
         raise HTTPException(

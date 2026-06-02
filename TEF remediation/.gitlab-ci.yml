@@ -1,5 +1,6 @@
 stages:
   - build
+  - scan
   - terraform
   - release
 
@@ -91,6 +92,50 @@ build-ui:
         ui/
     - docker push "$IMAGE:$CI_COMMIT_SHORT_SHA"
     - docker push "$IMAGE:latest"
+
+# ---------------------------------------------------------------------------
+# Container vulnerability scanning — Trivy
+#
+# Scans the published image for HIGH and CRITICAL CVEs after each build.
+# allow_failure: true lets the pipeline proceed while the team works through
+# the baseline findings; remove it once the image is clean.
+# ---------------------------------------------------------------------------
+.trivy_scan: &trivy_scan
+  stage: scan
+  image: aquasec/trivy:latest
+  before_script:
+    - echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+    - export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
+  after_script:
+    - rm -f /tmp/gcp-sa-key.json
+  allow_failure: true
+
+scan-reports-image:
+  <<: *trivy_scan
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - Dockerfile.python
+        - requirements.txt
+        - git_branches_gap/**/*
+        - git_gcp_code_vs_environment_drift/**/*
+        - bigquery_orphan_datasets/**/*
+        - clone_all_groups_repo/**/*
+        - entrypoint.sh
+  script:
+    - IMAGE="$REGISTRY/$PROJECT_ID/$REPO/devops-reports"
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL --no-progress "$IMAGE:$CI_COMMIT_SHORT_SHA"
+
+scan-ui-image:
+  <<: *trivy_scan
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes:
+        - ui/Dockerfile
+        - ui/**/*
+  script:
+    - IMAGE="$REGISTRY/$PROJECT_ID/$REPO/devops-reports-ui"
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL --no-progress "$IMAGE:$CI_COMMIT_SHORT_SHA"
 
 # ---------------------------------------------------------------------------
 # Terraform plan (informational — no apply in CI)
