@@ -75,6 +75,8 @@ case "$REPORT_TYPE" in
 
         log_json "INFO" "Phase 2: running env_drift for each repo in $SUBGROUP_ROOT (parallel)"
         WORK_TMPDIR=$(mktemp -d)
+        # Clean up temp dir on any exit — including signals and set -e triggers.
+        trap 'rm -rf "$WORK_TMPDIR"' EXIT
         pids=()
 
         for repo_path in "$SUBGROUP_ROOT"/*/; do
@@ -85,16 +87,21 @@ case "$REPORT_TYPE" in
                 EXECUTION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
                 export EXECUTION_ID
                 log_json "INFO" "env_drift: $project_name (execution_id=$EXECUTION_ID)"
+                # Capture exit code explicitly — do not rely on set -e inside the
+                # subshell, which would exit before the .exit file is written.
+                rc=0
                 python3 "$SCRIPTS_DIR/generate_code_environment_drift_report.py" \
                     --project-name "$project_name" \
                     --repo-path "$repo_path" \
-                    "$@"
-                echo $? > "$WORK_TMPDIR/$project_name.exit"
+                    "$@" || rc=$?
+                echo "$rc" > "$WORK_TMPDIR/$project_name.exit"
             ) &
             pids+=($!)
         done
 
-        wait "${pids[@]}"
+        # || true prevents set -e from triggering on a non-zero wait exit code
+        # before the exit-file loop has had a chance to run.
+        wait "${pids[@]}" || true
 
         FAILED=0
         for exit_file in "$WORK_TMPDIR"/*.exit; do
@@ -105,7 +112,6 @@ case "$REPORT_TYPE" in
                 FAILED=$((FAILED + 1))
             fi
         done
-        rm -rf "$WORK_TMPDIR"
 
         if [[ $FAILED -gt 0 ]]; then
             log_json "ERROR" "$FAILED repo(s) failed in env_drift"

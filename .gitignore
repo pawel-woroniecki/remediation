@@ -1,0 +1,28 @@
+# Terraform
+TEF remediation/Terraform/.terraform/
+TEF remediation/Terraform/terraform.tfstate
+TEF remediation/Terraform/terraform.tfstate.backup
+TEF remediation/Terraform/.terraform.lock.hcl
+
+# Service account key files — never commit these
+*.json.key
+runner-key.json
+*-key.json
+/tmp/gcp-sa-key.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Report outputs — generated artefacts, not source
+TEF remediation/outputs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
