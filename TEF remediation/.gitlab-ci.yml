@@ -7,9 +7,6 @@ variables:
   REGISTRY: europe-west3-docker.pkg.dev
   PROJECT_ID: tefde-gcp-fastoss-dev-gke
   REPO: devops-reports
-  # DinD: disable TLS so Docker client talks to the daemon over plain TCP.
-  DOCKER_TLS_CERTDIR: ""
-  DOCKER_HOST: tcp://docker:2375
 
 # ---------------------------------------------------------------------------
 # GCP authentication anchor
@@ -31,6 +28,11 @@ variables:
 #   3. Replace this anchor with the id_tokens + gcloud oidc flow.
 # ---------------------------------------------------------------------------
 .gcp_auth: &gcp_auth
+  variables:
+    # DinD: disable TLS so Docker client talks to the daemon over plain TCP.
+    # Scoped here so terraform-plan and create-release are not affected.
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: tcp://docker:2375
   image: google/cloud-sdk:slim
   services:
     - docker:24-dind

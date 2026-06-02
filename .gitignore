@@ -2,7 +2,8 @@
 TEF remediation/Terraform/.terraform/
 TEF remediation/Terraform/terraform.tfstate
 TEF remediation/Terraform/terraform.tfstate.backup
-TEF remediation/Terraform/.terraform.lock.hcl
+# .terraform.lock.hcl is intentionally NOT ignored — it pins provider
+# checksums and must be committed like package-lock.json.
 
 # Service account key files — never commit these
 *.json.key
