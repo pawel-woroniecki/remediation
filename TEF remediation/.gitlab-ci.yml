@@ -116,6 +116,7 @@ terraform-plan:
     - export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json
   script:
     - terraform init -input=false
+    - terraform validate
     - terraform plan -input=false -var-file=terraform.tfvars
   after_script:
     - rm -f /tmp/gcp-sa-key.json
