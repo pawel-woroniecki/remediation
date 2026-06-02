@@ -14,8 +14,12 @@ reports_gcs_bucket  = "tefde-gcp-fastoss-dev-gcs-devops-reports"
 # ---------------------------------------------------------------------------
 # Artifact Registry
 # ---------------------------------------------------------------------------
+# Image pushes from CI/CD use the devops-reports-runner SA (see artifact_registry.tf).
+# Generate a key for that SA and store it as GCP_SA_KEY in GitLab CI variables:
+#   gcloud iam service-accounts keys create runner-key.json \
+#     --iam-account=devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
+#     --project=tefde-gcp-fastoss-dev-gke
 artifact_registry_repo_id = "devops-reports"
-cicd_sa_email             = "YOUR_GITLAB_RUNNER_SA@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
 
 # ---------------------------------------------------------------------------
 # Container images
@@ -57,6 +61,14 @@ gitlab_base_url = "https://dot-portal.de.pri.o2.com/gitlab"
 gitlab_subgroup = "ndl_core"
 
 # ---------------------------------------------------------------------------
-# VPC (optional — uncomment if GitLab is on a private network)
+# Networking — VPC, subnet, VPC Access Connector, firewall rules
 # ---------------------------------------------------------------------------
-# vpc_connector = "projects/tefde-gcp-fastoss-dev-gke/locations/europe-west3/connectors/YOUR_CONNECTOR"
+# IP CIDR of the private network hosting dot-portal.de.pri.o2.com.
+# Used to scope the egress firewall rule that allows HTTPS to GitLab.
+# Ask your network team for the correct range, e.g. "10.100.0.0/16".
+gitlab_network_cidr = "REPLACE_WITH_GITLAB_NETWORK_CIDR"
+
+# Optional overrides — defaults shown, change only if they conflict with
+# existing subnets in your VPC address space.
+# vpc_network_name      = "devops-reports-vpc"
+# connector_subnet_cidr = "10.8.0.0/28"

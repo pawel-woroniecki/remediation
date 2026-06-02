@@ -74,12 +74,9 @@ resource "google_cloud_run_v2_job" "orphan_datasets" {
         }
       }
 
-      dynamic "vpc_access" {
-        for_each = var.vpc_connector != null ? [var.vpc_connector] : []
-        content {
-          connector = vpc_access.value
-          egress    = "ALL_TRAFFIC"
-        }
+      vpc_access {
+        connector = google_vpc_access_connector.devops_reports.id
+        egress    = "ALL_TRAFFIC"
       }
     }
   }
@@ -136,12 +133,9 @@ resource "google_cloud_run_v2_job" "env_drift" {
         }
       }
 
-      dynamic "vpc_access" {
-        for_each = var.vpc_connector != null ? [var.vpc_connector] : []
-        content {
-          connector = vpc_access.value
-          egress    = "ALL_TRAFFIC"
-        }
+      vpc_access {
+        connector = google_vpc_access_connector.devops_reports.id
+        egress    = "ALL_TRAFFIC"
       }
     }
   }
@@ -198,12 +192,9 @@ resource "google_cloud_run_v2_job" "commit_drift" {
         }
       }
 
-      dynamic "vpc_access" {
-        for_each = var.vpc_connector != null ? [var.vpc_connector] : []
-        content {
-          connector = vpc_access.value
-          egress    = "ALL_TRAFFIC"
-        }
+      vpc_access {
+        connector = google_vpc_access_connector.devops_reports.id
+        egress    = "ALL_TRAFFIC"
       }
     }
   }
@@ -260,12 +251,9 @@ resource "google_cloud_run_v2_job" "file_drift" {
         }
       }
 
-      dynamic "vpc_access" {
-        for_each = var.vpc_connector != null ? [var.vpc_connector] : []
-        content {
-          connector = vpc_access.value
-          egress    = "ALL_TRAFFIC"
-        }
+      vpc_access {
+        connector = google_vpc_access_connector.devops_reports.id
+        egress    = "ALL_TRAFFIC"
       }
     }
   }

@@ -13,15 +13,20 @@ variables:
 # ---------------------------------------------------------------------------
 # GCP authentication anchor
 #
-# Uses the CI/CD service account key stored as a masked GitLab CI variable
-# named GCP_SA_KEY (JSON format). The key must belong to the service account
-# whose email is set in var.cicd_sa_email in Terraform — that account already
-# has roles/artifactregistry.writer on the Artifact Registry repo.
+# Uses the devops-reports-runner service account key stored as a masked
+# GitLab CI variable named GCP_SA_KEY (JSON format). That SA already has
+# roles/artifactregistry.writer on the Artifact Registry repo.
+#
+# Generate the key once after terraform apply:
+#   gcloud iam service-accounts keys create runner-key.json \
+#     --iam-account=devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
+#     --project=tefde-gcp-fastoss-dev-gke
+# Then add the contents of runner-key.json as the GCP_SA_KEY CI variable.
 #
 # To upgrade to keyless Workload Identity Federation (no long-lived keys):
 #   1. Add a google_iam_workload_identity_pool + provider resource in Terraform
 #      targeting the GitLab OIDC issuer (https://gitlab.com).
-#   2. Grant the pool serviceAccount impersonation on cicd_sa_email.
+#   2. Grant the pool serviceAccount impersonation on devops-reports-runner.
 #   3. Replace this anchor with the id_tokens + gcloud oidc flow.
 # ---------------------------------------------------------------------------
 .gcp_auth: &gcp_auth

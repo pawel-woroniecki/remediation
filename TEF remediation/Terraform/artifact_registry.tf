@@ -18,13 +18,13 @@ resource "google_artifact_registry_repository_iam_member" "reports_runner_reader
   member     = "serviceAccount:${google_service_account.reports_runner.email}"
 }
 
-# Grant the CI/CD pipeline service account permission to push images.
+# Grant the Cloud Run Jobs service account permission to push images from CI/CD.
 resource "google_artifact_registry_repository_iam_member" "cicd_writer" {
   project    = var.project_id
   location   = var.region
   repository = google_artifact_registry_repository.devops_reports.name
   role       = "roles/artifactregistry.writer"
-  member     = "serviceAccount:${var.cicd_sa_email}"
+  member     = "serviceAccount:${google_service_account.reports_runner.email}"
 }
 
 # ---------------------------------------------------------------------------

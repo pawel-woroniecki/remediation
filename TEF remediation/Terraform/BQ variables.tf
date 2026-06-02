@@ -52,21 +52,27 @@ variable "gitlab_subgroup" {
   description = "GitLab subgroup name scanned by env_drift, commit_drift, and file_drift reports."
 }
 
-variable "vpc_connector" {
+variable "vpc_network_name" {
   type        = string
-  default     = null
-  description = "Optional VPC Access Connector resource name. Required if GitLab is on a private network."
+  default     = "devops-reports-vpc"
+  description = "Name of the dedicated VPC network created for Cloud Run Jobs to reach the private GitLab instance."
+}
+
+variable "connector_subnet_cidr" {
+  type        = string
+  default     = "10.8.0.0/28"
+  description = "CIDR range for the VPC Access Connector subnet. Must be /28 and must not overlap with other subnets in the VPC."
+}
+
+variable "gitlab_network_cidr" {
+  type        = string
+  description = "IP CIDR of the private network hosting the GitLab instance (dot-portal.de.pri.o2.com). Scopes the egress firewall rule that allows HTTPS traffic to GitLab."
 }
 
 variable "artifact_registry_repo_id" {
   type        = string
   default     = "devops-reports"
   description = "Artifact Registry repository ID for the devops-reports Docker image."
-}
-
-variable "cicd_sa_email" {
-  type        = string
-  description = "Service account email used by the CI/CD pipeline (e.g. GitLab Runner) to push Docker images to Artifact Registry."
 }
 
 variable "ui_container_image" {
