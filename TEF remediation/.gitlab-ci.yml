@@ -1,6 +1,7 @@
 stages:
   - build
   - terraform
+  - release
 
 variables:
   REGISTRY: europe-west3-docker.pkg.dev
@@ -110,3 +111,26 @@ terraform-plan:
     - terraform plan -input=false -var-file=terraform.tfvars
   after_script:
     - rm -f /tmp/gcp-sa-key.json
+
+# ---------------------------------------------------------------------------
+# GitLab Release — created automatically when a vX.Y.Z tag is pushed.
+#
+# Usage:
+#   git tag -a v1.2.0 -m "Release v1.2.0: <summary>"
+#   git push origin v1.2.0
+#
+# The release description is read from the annotated tag message so the
+# release notes live in Git alongside the code rather than being typed
+# into the GitLab UI manually.
+# ---------------------------------------------------------------------------
+create-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+/
+  script:
+    - echo "Creating GitLab release for $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "Release $CI_COMMIT_TAG"
+    description: $CI_COMMIT_TAG_MESSAGE
