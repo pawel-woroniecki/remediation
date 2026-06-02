@@ -27,3 +27,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Local working directories
+pw/
+.claude/
