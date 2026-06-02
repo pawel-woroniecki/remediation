@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # JSON logging helper — outputs Cloud Logging-compatible JSON to stdout.
-# Uses Python for serialisation so quotes, backslashes, and newlines in
-# $message are correctly escaped rather than producing malformed JSON.
+# Escapes backslashes first, then double quotes, so the output is valid JSON
+# without spawning a subprocess on every call.
 log_json() {
   local severity="$1"
-  local message="$2"
-  python3 -c "import json,sys; print(json.dumps({'severity':sys.argv[1],'message':sys.argv[2]}))" \
-    "$severity" "$message"
+  local message="${2//\\/\\\\}"
+  message="${message//\"/\\\"}"
+  printf '{"severity":"%s","message":"%s"}\n' "$severity" "$message"
 }
 
 # Auto-generate EXECUTION_ID if not supplied by the caller.

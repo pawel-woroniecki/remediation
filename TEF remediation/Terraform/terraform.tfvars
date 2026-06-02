@@ -42,7 +42,7 @@ bq_scan_project_id = "tefde-gcp-fastoss-prod"
 #   ui_invoker_member = "domain:yourcompany.com"
 # Or a specific Google Group:
 #   ui_invoker_member = "group:devops-team@yourcompany.com"
-ui_invoker_member = "domain:yourcompany.com"   # replace with your Google Workspace domain, e.g. domain:telefonica.de
+ui_invoker_member = "domain:telefonica.de"
 
 # ---------------------------------------------------------------------------
 # Service account

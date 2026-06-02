@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -75,7 +76,12 @@ def inject_token(clone_url: str, token: str) -> str:
 
 
 def _git(args: list[str], cwd: str | None = None) -> int:
-    return subprocess.run(["git"] + args, cwd=cwd).returncode
+    result = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+    if result.stderr:
+        # Redact oauth2 tokens from git error output before it reaches logs.
+        redacted = re.sub(r"oauth2:[^@]+@", "oauth2:***@", result.stderr)
+        print(redacted, end="", file=sys.stderr)
+    return result.returncode
 
 
 def _git_out(args: list[str], cwd: str | None = None) -> str:
