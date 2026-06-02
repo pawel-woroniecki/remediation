@@ -458,7 +458,6 @@ def main() -> int:
     args = parse_args()
     reporting_project = args.reporting_project or args.gcp_project
     try:
-        # Fix 1: try block is now correctly indented at 4 spaces.
         workspace_root = Path(args.workspace_root).resolve()
         subgroup_root = (workspace_root / args.subgroup).resolve()
         bq_client = bigquery.Client(project=reporting_project)
