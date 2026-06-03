@@ -85,7 +85,7 @@ resource "google_project_iam_member" "reports_runner_bq_job_user" {
 # for datasets not referenced by any repo. The runner SA needs read access there.
 resource "google_project_iam_member" "reports_runner_scan_bq_viewer" {
   project = var.bq_scan_project_id
-  role    = "roles/bigquery.dataViewer"
+  role    = "roles/bigquery.metadataViewer"
   member  = "serviceAccount:${google_service_account.reports_runner.email}"
 }
 

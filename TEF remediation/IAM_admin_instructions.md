@@ -256,18 +256,20 @@ gcloud projects add-iam-policy-binding tefde-gcp-fastoss-dev \
 
 ---
 
-#### Grant 8 — Project IAM: read BigQuery datasets for orphan scan
+#### Grant 8 — Project IAM: read BigQuery metadata for orphan scan
 
-**Why:** The orphan datasets report lists and inspects all BigQuery
-datasets in the production project to find ones not owned by any repo.
+**Why:** The orphan datasets report lists all datasets and queries
+`INFORMATION_SCHEMA` for table and routine names. It reads only metadata
+— never actual row data — so `metadataViewer` is sufficient and
+`dataViewer` would be over-privileged.
 
 **Resource:** Project `tefde-gcp-fastoss-prod`
-**Role:** `roles/bigquery.dataViewer`
+**Role:** `roles/bigquery.metadataViewer`
 
 **gcloud CLI:**
 ```bash
 gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
-  --role=roles/bigquery.dataViewer \
+  --role=roles/bigquery.metadataViewer \
   --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
 ```
 
@@ -275,7 +277,7 @@ gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
 1. Navigate to **IAM & Admin → IAM** (ensure project `tefde-gcp-fastoss-prod` is selected)
 2. Click **Grant Access**
 3. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
-4. Role: `BigQuery Data Viewer`
+4. Role: `BigQuery Metadata Viewer`
 5. Click **Save**
 
 ---
@@ -315,7 +317,7 @@ gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
 | 5 | `tefde-gcp-fastoss-dev-gke` | Project | `roles/run.developer` |
 | 6 | `tefde-gcp-fastoss-dev` | BQ dataset `devops_reports` | `roles/bigquery.dataEditor` |
 | 7 | `tefde-gcp-fastoss-dev` | Project | `roles/bigquery.jobUser` |
-| 8 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.dataViewer` |
+| 8 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.metadataViewer` |
 | 9 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.jobUser` |
 
 ---
