@@ -8,7 +8,7 @@ Reports solution to function correctly.
 
 **Service account email:**
 ```
-devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
+devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
 ```
 
 Permissions span three GCP projects:
@@ -32,7 +32,7 @@ Before granting any permissions:
 1. The service account must already exist. Verify with:
    ```bash
    gcloud iam service-accounts describe \
-     devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
+     devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com \
      --project=tefde-gcp-fastoss-dev-gke
    ```
    If it does not exist, create it:
@@ -68,7 +68,7 @@ Secret Manager at job runtime.
 gcloud secrets add-iam-policy-binding gitlab-token \
   --project=tefde-gcp-fastoss-dev-gke \
   --role=roles/secretmanager.secretAccessor \
-  --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+  --member="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 ```
 
 **GCP Console:**
@@ -76,7 +76,7 @@ gcloud secrets add-iam-policy-binding gitlab-token \
 2. Click on the secret `gitlab-token`
 3. Select the **Permissions** tab
 4. Click **Grant Access**
-5. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+5. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 6. Role: `Secret Manager Secret Accessor`
 7. Click **Save**
 
@@ -95,7 +95,7 @@ after each run.
 gcloud storage buckets add-iam-policy-binding \
   gs://tefde-gcp-fastoss-dev-gcs-devops-reports \
   --role=roles/storage.objectCreator \
-  --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+  --member="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 ```
 
 **GCP Console:**
@@ -103,7 +103,7 @@ gcloud storage buckets add-iam-policy-binding \
 2. Click on `tefde-gcp-fastoss-dev-gcs-devops-reports`
 3. Select the **Permissions** tab
 4. Click **Grant Access**
-5. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+5. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 6. Role: `Storage Object Creator`
 7. Click **Save**
 
@@ -123,7 +123,7 @@ gcloud artifacts repositories add-iam-policy-binding devops-reports \
   --project=tefde-gcp-fastoss-dev-gke \
   --location=europe-west3 \
   --role=roles/artifactregistry.reader \
-  --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+  --member="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 ```
 
 **GCP Console:**
@@ -131,7 +131,7 @@ gcloud artifacts repositories add-iam-policy-binding devops-reports \
 2. Click on `devops-reports`
 3. Click **Show Info Panel** (top right) to open the permissions panel
 4. Click **Add Principal**
-5. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+5. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 6. Role: `Artifact Registry Reader`
 7. Click **Save**
 
@@ -151,14 +151,14 @@ gcloud artifacts repositories add-iam-policy-binding devops-reports \
   --project=tefde-gcp-fastoss-dev-gke \
   --location=europe-west3 \
   --role=roles/artifactregistry.writer \
-  --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+  --member="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 ```
 
 **GCP Console:**
 1. Navigate to **Artifact Registry → Repositories**
 2. Click on `devops-reports`
 3. Click **Show Info Panel** → **Add Principal**
-4. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+4. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 5. Role: `Artifact Registry Writer`
 6. Click **Save**
 
@@ -176,15 +176,49 @@ jobs and read their execution status.
 ```bash
 gcloud projects add-iam-policy-binding tefde-gcp-fastoss-dev-gke \
   --role=roles/run.developer \
-  --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+  --member="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 ```
 
 **GCP Console:**
 1. Navigate to **IAM & Admin → IAM** (ensure project `tefde-gcp-fastoss-dev-gke` is selected)
 2. Click **Grant Access**
-3. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+3. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 4. Role: `Cloud Run Developer`
-5. Click **Save**
+5. Click **Save`
+
+---
+
+#### Grant 10 — Service Account IAM: allow Terraform deployer to assign the SA to Cloud Run
+
+**Why:** When `terraform apply` creates or updates a Cloud Run Service or Job that
+uses `devops-reports-runner` as its runtime identity, GCP checks that the deploying
+identity has `iam.serviceaccounts.actAs` on that SA. Without this, Cloud Run creation
+fails with a 403. This grant goes on the SA itself, not on a project.
+
+**Resource:** Service account `devops-reports-runner` in project `tefde-gcp-resvadm-prod-backend`
+**Role:** `roles/iam.serviceAccountUser`
+**Principal:** The identity that runs `terraform apply` — replace `DEPLOYER_IDENTITY`
+below with the actual principal (e.g.
+`serviceAccount:gitlab-runner@YOUR_PROJECT.iam.gserviceaccount.com` or
+`user:you@example.com`).
+
+**gcloud CLI:**
+```bash
+gcloud iam service-accounts add-iam-policy-binding \
+  devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com \
+  --project=tefde-gcp-resvadm-prod-backend \
+  --role=roles/iam.serviceAccountUser \
+  --member="DEPLOYER_IDENTITY"
+```
+
+**GCP Console:**
+1. Navigate to **IAM & Admin → Service Accounts** (project `tefde-gcp-resvadm-prod-backend`)
+2. Click on `devops-reports-runner`
+3. Select the **Permissions** tab
+4. Click **Grant Access**
+5. New principals: the identity that runs `terraform apply`
+6. Role: `Service Account User`
+7. Click **Save**
 
 ---
 
@@ -210,7 +244,7 @@ bq get-iam-policy --format=json \
 # {
 #   "role": "roles/bigquery.dataEditor",
 #   "members": [
-#     "serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+#     "serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 #   ]
 # }
 
@@ -222,7 +256,7 @@ bq set-iam-policy tefde-gcp-fastoss-dev:devops_reports /tmp/bq_policy.json
 2. Expand project `tefde-gcp-fastoss-dev`
 3. Click the three-dot menu next to dataset `devops_reports` → **Share**
 4. Click **Add Principal**
-5. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+5. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 6. Role: `BigQuery Data Editor`
 7. Click **Save**
 
@@ -240,13 +274,13 @@ BigQuery query or streaming insert (separate from the dataset-level role above).
 ```bash
 gcloud projects add-iam-policy-binding tefde-gcp-fastoss-dev \
   --role=roles/bigquery.jobUser \
-  --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+  --member="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 ```
 
 **GCP Console:**
 1. Navigate to **IAM & Admin → IAM** (ensure project `tefde-gcp-fastoss-dev` is selected)
 2. Click **Grant Access**
-3. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+3. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 4. Role: `BigQuery Job User`
 5. Click **Save**
 
@@ -270,13 +304,13 @@ gcloud projects add-iam-policy-binding tefde-gcp-fastoss-dev \
 ```bash
 gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
   --role=roles/bigquery.metadataViewer \
-  --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+  --member="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 ```
 
 **GCP Console:**
 1. Navigate to **IAM & Admin → IAM** (ensure project `tefde-gcp-fastoss-prod` is selected)
 2. Click **Grant Access**
-3. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+3. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 4. Role: `BigQuery Metadata Viewer`
 5. Click **Save**
 
@@ -294,13 +328,13 @@ gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
 ```bash
 gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
   --role=roles/bigquery.jobUser \
-  --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+  --member="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 ```
 
 **GCP Console:**
 1. Navigate to **IAM & Admin → IAM** (ensure project `tefde-gcp-fastoss-prod` is selected)
 2. Click **Grant Access**
-3. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+3. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 4. Role: `BigQuery Job User`
 5. Click **Save**
 
@@ -308,17 +342,18 @@ gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
 
 ## Complete Grants Summary
 
-| # | Project | Resource | Role |
-|---|---|---|---|
-| 1 | `tefde-gcp-fastoss-dev-gke` | Secret `gitlab-token` | `roles/secretmanager.secretAccessor` |
-| 2 | `tefde-gcp-fastoss-dev-gke` | Bucket `tefde-gcp-fastoss-dev-gcs-devops-reports` | `roles/storage.objectCreator` |
-| 3 | `tefde-gcp-fastoss-dev-gke` | AR repo `devops-reports` (europe-west3) | `roles/artifactregistry.reader` |
-| 4 | `tefde-gcp-fastoss-dev-gke` | AR repo `devops-reports` (europe-west3) | `roles/artifactregistry.writer` |
-| 5 | `tefde-gcp-fastoss-dev-gke` | Project | `roles/run.developer` |
-| 6 | `tefde-gcp-fastoss-dev` | BQ dataset `devops_reports` | `roles/bigquery.dataEditor` |
-| 7 | `tefde-gcp-fastoss-dev` | Project | `roles/bigquery.jobUser` |
-| 8 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.metadataViewer` |
-| 9 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.jobUser` |
+| # | Project | Resource | Role | Principal |
+|---|---|---|---|---|
+| 1 | `tefde-gcp-fastoss-dev-gke` | Secret `gitlab-token` | `roles/secretmanager.secretAccessor` | `devops-reports-runner` SA |
+| 2 | `tefde-gcp-fastoss-dev-gke` | Bucket `tefde-gcp-fastoss-dev-gcs-devops-reports` | `roles/storage.objectCreator` | `devops-reports-runner` SA |
+| 3 | `tefde-gcp-fastoss-dev-gke` | AR repo `devops-reports` (europe-west3) | `roles/artifactregistry.reader` | `devops-reports-runner` SA |
+| 4 | `tefde-gcp-fastoss-dev-gke` | AR repo `devops-reports` (europe-west3) | `roles/artifactregistry.writer` | `devops-reports-runner` SA |
+| 5 | `tefde-gcp-fastoss-dev-gke` | Project | `roles/run.developer` | `devops-reports-runner` SA |
+| 6 | `tefde-gcp-fastoss-dev` | BQ dataset `devops_reports` | `roles/bigquery.dataEditor` | `devops-reports-runner` SA |
+| 7 | `tefde-gcp-fastoss-dev` | Project | `roles/bigquery.jobUser` | `devops-reports-runner` SA |
+| 8 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.metadataViewer` | `devops-reports-runner` SA |
+| 9 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.jobUser` | `devops-reports-runner` SA |
+| 10 | `tefde-gcp-resvadm-prod-backend` | SA `devops-reports-runner` (resource) | `roles/iam.serviceAccountUser` | Terraform deployer identity |
 
 ---
 
@@ -328,7 +363,8 @@ Run the following commands after granting all permissions to confirm
 each binding is in place.
 
 ```bash
-SA="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+SA="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
+DEPLOYER="DEPLOYER_IDENTITY"   # replace with the identity that runs terraform apply
 
 # Grant 1 — Secret Manager
 gcloud secrets get-iam-policy gitlab-token \
@@ -363,5 +399,12 @@ gcloud projects get-iam-policy tefde-gcp-fastoss-prod \
   --format="table(bindings.role,bindings.members)" | grep "$SA"
 ```
 
-Each command should return at least one line containing the service
-account email. If a command returns no output, that grant is missing.
+# Grant 10 — serviceAccountUser on the SA itself
+gcloud iam service-accounts get-iam-policy \
+  devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com \
+  --project=tefde-gcp-resvadm-prod-backend \
+  --format="table(bindings.role,bindings.members)" | grep "$DEPLOYER"
+```
+
+Each command should return at least one line containing the relevant
+principal. If a command returns no output, that grant is missing.

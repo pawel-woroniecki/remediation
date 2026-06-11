@@ -29,10 +29,9 @@ variable "gitlab_token_secret_id" {
   description = "Secret Manager secret ID that stores the GitLab PAT (read_api + read_repository scopes)."
 }
 
-variable "cloud_run_sa_name" {
+variable "cloud_run_sa_email" {
   type        = string
-  default     = "devops-reports-runner"
-  description = "Account ID for the Cloud Run Jobs service account (created by Terraform)."
+  description = "Full email address of the Cloud Run service account created by the IAM team, e.g. devops-reports-runner@PROJECT.iam.gserviceaccount.com"
 }
 
 variable "container_image" {

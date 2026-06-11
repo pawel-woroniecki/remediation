@@ -107,7 +107,7 @@ TEF remediation/
 │
 └── Terraform/
     ├── BQ variables.tf       # All input variables
-    ├── BQ DS + Tables.tf     # SA, Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true)
+    ├── BQ DS + Tables.tf     # Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true); IAM bindings commented out — managed by TEF IAM Team
     ├── Cloud Run Jobs.tf     # 4 Cloud Run Job resources (VPC egress via connector)
     ├── ui_service.tf         # UI Cloud Run Service + IAM (restricted to domain:telefonica.de)
     ├── artifact_registry.tf  # Artifact Registry repo + IAM
@@ -152,10 +152,12 @@ The PAT requires `read_api` and `read_repository` scopes. Prefer a **Group Acces
 
 ### 4. Create a key for `devops-reports-runner` (used by CI/CD to push images)
 
+> **Note:** The service account `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com` is created and owned by the **TEF IAM Team**. Request the key from that team or ask them to generate it.
+
 ```bash
 gcloud iam service-accounts keys create runner-key.json \
-  --iam-account=devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
-  --project=tefde-gcp-fastoss-dev-gke
+  --iam-account=devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com \
+  --project=tefde-gcp-resvadm-prod-backend
 ```
 
 Add the contents of `runner-key.json` as the `GCP_SA_KEY` **masked** variable in GitLab CI/CD settings, then delete the local file. See `.gitlab-ci.yml` for the Workload Identity Federation upgrade path that eliminates this key.
@@ -236,10 +238,14 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`. All tables
 
 ## Service Account
 
-A single service account `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com` is used for:
+A single service account `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com` is used for:
 - Cloud Run Jobs runtime (Workload Identity — no key required)
 - UI Cloud Run Service runtime (Workload Identity)
 - CI/CD image pushes to Artifact Registry (JSON key stored as `GCP_SA_KEY` in GitLab CI)
+
+> **The service account is created and owned by the TEF IAM Team.** It is not managed by this Terraform workspace. All IAM binding resources in Terraform are commented out for reference only — the TEF IAM Team applies the actual grants manually.
+
+The Terraform deployer identity also requires `roles/iam.serviceAccountUser` on the SA (Grant #10 in `IAM_admin_instructions.md`) to allow Cloud Run to be assigned this SA during `terraform apply`.
 
 See `IAM_admin_instructions.md` for the full list of IAM grants required.
 

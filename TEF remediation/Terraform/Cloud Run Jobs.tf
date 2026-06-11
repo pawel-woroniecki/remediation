@@ -2,7 +2,6 @@
 # Cloud Run Jobs — one per report type
 # ---------------------------------------------------------------------------
 # Dependencies (defined in BQ DS + Tables.tf):
-#   google_service_account.reports_runner
 #   google_secret_manager_secret.gitlab_token  (token value loaded manually)
 #   google_bigquery_dataset.devops_reports
 #   google_storage_bucket.devops_reports
@@ -12,7 +11,7 @@
 # ---------------------------------------------------------------------------
 
 locals {
-  runner_sa       = google_service_account.reports_runner.email
+  runner_sa       = var.cloud_run_sa_email
   job_region      = var.region
   job_project     = var.project_id
   job_image       = var.container_image
@@ -279,5 +278,5 @@ output "file_drift_job_name" {
 }
 
 output "reports_runner_sa_email" {
-  value = google_service_account.reports_runner.email
+  value = var.cloud_run_sa_email
 }

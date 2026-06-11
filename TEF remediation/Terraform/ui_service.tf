@@ -7,11 +7,15 @@
 # ---------------------------------------------------------------------------
 
 # Trigger Cloud Run Jobs and read execution status (needed by the UI backend)
-resource "google_project_iam_member" "reports_runner_run_developer" {
-  project = var.project_id
-  role    = "roles/run.developer"
-  member  = "serviceAccount:${google_service_account.reports_runner.email}"
-}
+# NOTE: IAM binding managed by the TEF IAM Team.
+# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# is owned by that team. This resource is kept here for documentation purposes only.
+# Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
+# resource "google_project_iam_member" "reports_runner_run_developer" {
+#   project = var.project_id
+#   role    = "roles/run.developer"
+#   member  = "serviceAccount:${var.cloud_run_sa_email}"
+# }
 
 # BigQuery dataViewer and jobUser on the reporting project are already granted
 # to devops-reports-runner via reports_runner_editor (dataEditor) and
@@ -28,7 +32,7 @@ resource "google_cloud_run_v2_service" "reports_ui" {
   depends_on = [google_project_service.run]
 
   template {
-    service_account = google_service_account.reports_runner.email
+    service_account = var.cloud_run_sa_email
 
     containers {
       image = var.ui_container_image
@@ -96,6 +100,6 @@ output "ui_url" {
 }
 
 output "ui_sa_email" {
-  value       = google_service_account.reports_runner.email
+  value       = var.cloud_run_sa_email
   description = "Service account email used by the UI Cloud Run Service (shared with Cloud Run Jobs)."
 }
