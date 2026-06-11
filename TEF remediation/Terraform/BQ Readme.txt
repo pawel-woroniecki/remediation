@@ -8,27 +8,30 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 
 | File | Contents |
 |---|---|
-| `BQ variables.tf` | Terraform provider, required providers, and all input variables |
-| `BQ DS + Tables.tf` | Service account, Secret Manager, GCS bucket, BigQuery dataset + 7 tables, IAM bindings |
+| `BQ variables.tf` | All input variables |
+| `BQ DS + Tables.tf` | Secret Manager (europe-west3), GCS bucket, BigQuery dataset + 8 tables; IAM bindings commented out — managed by TEF IAM Team |
 | `Cloud Run Jobs.tf` | 4 Cloud Run Job resources (one per report type) |
-| `artifact_registry.tf` | Artifact Registry Docker repository + pull/push IAM |
+| `ui_service.tf` | UI Cloud Run Service + invoker IAM; run.developer binding commented out — managed by TEF IAM Team |
+| `artifact_registry.tf` | Artifact Registry Docker repository; IAM bindings commented out — managed by TEF IAM Team |
+| `networking.tf` | Dedicated VPC, subnet, VPC Access Connector, firewall rules |
 | `apis.tf` | GCP API enablement for both projects |
-| `looker.tf` | Looker read-only service account + BigQuery IAM |
+| `looker.tf` | Comment only — Looker Studio requires no service account |
+| `backend.tf` | Terraform state backend |
+| `provider.tf` | Google provider configuration |
 | `terraform.tfvars` | Variable values — fill in before running |
 
 ---
 
-## Two-Project Structure
+## Multi-Project Structure
 
 | Resource | Project variable | Actual project |
 |---|---|---|
-| Service account | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | Secret Manager | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | GCS bucket | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | Artifact Registry | `project_id` | `tefde-gcp-fastoss-dev-gke` |
-| Cloud Run Jobs | `project_id` | `tefde-gcp-fastoss-dev-gke` |
+| Cloud Run Jobs + UI Service | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | BigQuery dataset + tables | `reporting_project_id` | `tefde-gcp-fastoss-dev` |
-| Looker SA | `reporting_project_id` | `tefde-gcp-fastoss-dev` |
+| Service account *(external)* | — | `tefde-gcp-resvadm-prod-backend` (TEF IAM Team) |
 
 ---
 
@@ -38,17 +41,19 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 |---|---|---|---|
 | `project_id` | — | yes | Cloud Run / infrastructure project |
 | `reporting_project_id` | — | yes | BigQuery reporting project |
-| `region` | `europe-west3` | no | GCP region |
+| `region` | `europe-west3` | no | GCP region (also used for Secret Manager replication) |
 | `dataset_id` | `devops_reports` | no | BigQuery dataset name |
 | `reports_gcs_bucket` | — | yes | GCS bucket name for CSV outputs |
 | `gitlab_token_secret_id` | `gitlab-token` | no | Secret Manager secret ID for GitLab PAT |
-| `cloud_run_sa_name` | `devops-reports-runner` | no | Service account account-id |
-| `container_image` | — | yes | Full Docker image URI |
+| `cloud_run_sa_email` | — | yes | Full email of the SA provided by the TEF IAM Team |
+| `container_image` | — | yes | Full Docker image URI for Cloud Run Jobs |
+| `ui_container_image` | — | yes | Full Docker image URI for the UI Cloud Run Service |
 | `gitlab_base_url` | `https://dot-portal.de.pri.o2.com/gitlab` | no | GitLab instance URL |
 | `gitlab_subgroup` | `ndl_core` | no | Subgroup scanned by reports |
-| `vpc_connector` | `null` | no | VPC connector (if GitLab is private) |
+| `gitlab_network_cidr` | — | yes | CIDR of the network hosting the GitLab instance |
 | `artifact_registry_repo_id` | `devops-reports` | no | Artifact Registry repository ID |
-| `cicd_sa_email` | — | yes | GitLab Runner SA that pushes Docker images |
+| `bq_scan_project_id` | — | yes | BigQuery project scanned by the orphan datasets report |
+| `ui_invoker_member` | `allAuthenticatedUsers` | no | IAM member allowed to invoke the UI (use `domain:yourcompany.com`) |
 
 ---
 
@@ -72,32 +77,33 @@ gcloud secrets versions add gitlab-token \
   --data-file=- <<< "YOUR_GITLAB_PAT"
 ```
 
-### 2. Build and push the Docker image
+### 2. Build and push the Docker images
+
+Images are built automatically by the GitLab CI pipeline. To build manually:
 
 ```bash
+SHA=$(git rev-parse --short HEAD)
+
 docker build -f ../Dockerfile.python \
-  -t europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:latest ..
-
+  -t europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:$SHA ..
 docker push \
-  europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:latest
+  europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:$SHA
+
+docker build -f ../ui/Dockerfile \
+  -t europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui:$SHA ../ui
+docker push \
+  europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui:$SHA
 ```
-
-### 3. Create the Looker service account key
-
-```bash
-gcloud iam service-accounts keys create looker-bq-reader-key.json \
-  --iam-account=looker-bq-reader@tefde-gcp-fastoss-dev.iam.gserviceaccount.com \
-  --project=tefde-gcp-fastoss-dev
-```
-
-Upload `looker-bq-reader-key.json` to **Looker Admin → Connections → BigQuery**.
-Delete the local key file after uploading.
 
 ---
 
-## Service Accounts Created
+## Service Account
 
-| SA | Project | Purpose |
-|---|---|---|
-| `devops-reports-runner` | `tefde-gcp-fastoss-dev-gke` | Cloud Run Jobs runtime identity |
-| `looker-bq-reader` | `tefde-gcp-fastoss-dev` | Looker BigQuery read access |
+The single service account `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
+is **created and managed by the TEF IAM Team**. It is not provisioned by this Terraform workspace.
+
+All `google_*_iam_member` resources referencing this SA are commented out in the Terraform files.
+The TEF IAM Team applies the grants listed in `../IAM_admin_instructions.md`.
+
+The Terraform deployer identity must hold `roles/iam.serviceAccountUser` on this SA
+(Grant #10 in `IAM_admin_instructions.md`) before running `terraform apply`.

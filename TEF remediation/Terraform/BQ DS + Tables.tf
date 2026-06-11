@@ -1,19 +1,4 @@
 # ---------------------------------------------------------------------------
-# Service Account — Cloud Run Jobs runner
-# ---------------------------------------------------------------------------
-resource "google_service_account" "reports_runner" {
-  project      = var.project_id
-  account_id   = var.cloud_run_sa_name
-  display_name = "DevOps Reports Cloud Run Runner"
-  description  = "Used by all devops-reports Cloud Run Jobs to access BQ, GCS, and Secret Manager."
-
-  depends_on = [
-    google_project_service.iam_gke,
-    google_project_service.cloudresourcemanager_gke,
-  ]
-}
-
-# ---------------------------------------------------------------------------
 # Secret Manager — GitLab PAT
 # ---------------------------------------------------------------------------
 # This resource creates the secret container only.
@@ -24,18 +9,26 @@ resource "google_secret_manager_secret" "gitlab_token" {
   secret_id = var.gitlab_token_secret_id
 
   replication {
-    auto {}
+    user_managed {
+      replicas {
+        location = var.region
+      }
+    }
   }
 
   depends_on = [google_project_service.secretmanager]
 }
 
-resource "google_secret_manager_secret_iam_member" "gitlab_token_accessor" {
-  project   = var.project_id
-  secret_id = google_secret_manager_secret.gitlab_token.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.reports_runner.email}"
-}
+# NOTE: IAM binding managed by the TEF IAM Team.
+# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# is owned by that team. This resource is kept here for documentation purposes only.
+# Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
+# resource "google_secret_manager_secret_iam_member" "gitlab_token_accessor" {
+#   project   = var.project_id
+#   secret_id = google_secret_manager_secret.gitlab_token.secret_id
+#   role      = "roles/secretmanager.secretAccessor"
+#   member    = "serviceAccount:${var.cloud_run_sa_email}"
+# }
 
 # ---------------------------------------------------------------------------
 # GCS bucket — report CSV outputs
@@ -54,46 +47,66 @@ resource "google_storage_bucket" "devops_reports" {
   depends_on = [google_project_service.storage_gke]
 }
 
-resource "google_storage_bucket_iam_member" "reports_runner_gcs_writer" {
-  bucket = google_storage_bucket.devops_reports.name
-  role   = "roles/storage.objectCreator"
-  member = "serviceAccount:${google_service_account.reports_runner.email}"
-}
+# NOTE: IAM binding managed by the TEF IAM Team.
+# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# is owned by that team. This resource is kept here for documentation purposes only.
+# Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
+# resource "google_storage_bucket_iam_member" "reports_runner_gcs_writer" {
+#   bucket = google_storage_bucket.devops_reports.name
+#   role   = "roles/storage.objectCreator"
+#   member = "serviceAccount:${var.cloud_run_sa_email}"
+# }
 
 # ---------------------------------------------------------------------------
 # BigQuery IAM — dataset-level write + project-level job execution
 # ---------------------------------------------------------------------------
-resource "google_bigquery_dataset_iam_member" "reports_runner_editor" {
-  project    = var.reporting_project_id
-  dataset_id = google_bigquery_dataset.devops_reports.dataset_id
-  role       = "roles/bigquery.dataEditor"
-  member     = "serviceAccount:${google_service_account.reports_runner.email}"
-}
+# NOTE: IAM binding managed by the TEF IAM Team.
+# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# is owned by that team. This resource is kept here for documentation purposes only.
+# Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
+# resource "google_bigquery_dataset_iam_member" "reports_runner_editor" {
+#   project    = var.reporting_project_id
+#   dataset_id = google_bigquery_dataset.devops_reports.dataset_id
+#   role       = "roles/bigquery.dataEditor"
+#   member     = "serviceAccount:${var.cloud_run_sa_email}"
+# }
 
 # bigquery.jobUser must be granted in the project where BQ jobs are executed,
 # which is the reporting project (where the dataset lives).
-resource "google_project_iam_member" "reports_runner_bq_job_user" {
-  project = var.reporting_project_id
-  role    = "roles/bigquery.jobUser"
-  member  = "serviceAccount:${google_service_account.reports_runner.email}"
-}
+# NOTE: IAM binding managed by the TEF IAM Team.
+# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# is owned by that team. This resource is kept here for documentation purposes only.
+# Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
+# resource "google_project_iam_member" "reports_runner_bq_job_user" {
+#   project = var.reporting_project_id
+#   role    = "roles/bigquery.jobUser"
+#   member  = "serviceAccount:${var.cloud_run_sa_email}"
+# }
 
 # ---------------------------------------------------------------------------
 # BigQuery IAM — orphan dataset scan project
 # ---------------------------------------------------------------------------
 # The orphan_datasets report scans a separate BigQuery project (typically prod)
 # for datasets not referenced by any repo. The runner SA needs read access there.
-resource "google_project_iam_member" "reports_runner_scan_bq_viewer" {
-  project = var.bq_scan_project_id
-  role    = "roles/bigquery.metadataViewer"
-  member  = "serviceAccount:${google_service_account.reports_runner.email}"
-}
+# NOTE: IAM binding managed by the TEF IAM Team.
+# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# is owned by that team. This resource is kept here for documentation purposes only.
+# Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
+# resource "google_project_iam_member" "reports_runner_scan_bq_viewer" {
+#   project = var.bq_scan_project_id
+#   role    = "roles/bigquery.metadataViewer"
+#   member  = "serviceAccount:${var.cloud_run_sa_email}"
+# }
 
-resource "google_project_iam_member" "reports_runner_scan_bq_job_user" {
-  project = var.bq_scan_project_id
-  role    = "roles/bigquery.jobUser"
-  member  = "serviceAccount:${google_service_account.reports_runner.email}"
-}
+# NOTE: IAM binding managed by the TEF IAM Team.
+# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# is owned by that team. This resource is kept here for documentation purposes only.
+# Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
+# resource "google_project_iam_member" "reports_runner_scan_bq_job_user" {
+#   project = var.bq_scan_project_id
+#   role    = "roles/bigquery.jobUser"
+#   member  = "serviceAccount:${var.cloud_run_sa_email}"
+# }
 
 resource "google_bigquery_dataset" "devops_reports" {
   dataset_id = var.dataset_id
