@@ -7,7 +7,7 @@
  * Tables  : devops_reports.executions
  *           devops_reports.orphan_datasets
  *           devops_reports.orphan_dataset_objects
- * Usage   : Replace <GCP_PROJECT> with your GCP project ID.
+ * Usage   : Replace tefde-gcp-fastoss-dev with your GCP project ID.
  *           In Looker, register as a native derived table or run via SQL Runner.
  *           In Looker Studio, use as a Custom Query data source.
  *
@@ -29,7 +29,7 @@ WITH latest_exec AS (
     environment,
     status,
     triggered_by
-  FROM `<GCP_PROJECT>.devops_reports.executions`
+  FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'orphan_datasets'
     AND status      = 'success'
   QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
@@ -47,7 +47,7 @@ datasets AS (
     d.owner,
     d.risk_score,
     DATE_DIFF(CURRENT_DATE(), DATE(d.last_modified), DAY) AS days_since_modified
-  FROM `<GCP_PROJECT>.devops_reports.orphan_datasets` d
+  FROM `tefde-gcp-fastoss-dev.devops_reports.orphan_datasets` d
   JOIN latest_exec USING (execution_id)
 ),
 
@@ -64,7 +64,7 @@ objects_agg AS (
       UPPER(o.object_type) NOT IN ('TABLE','VIEW')
     )                                          AS other_objects,
     MAX(o.last_modified)                       AS most_recent_object_change
-  FROM `<GCP_PROJECT>.devops_reports.orphan_dataset_objects` o
+  FROM `tefde-gcp-fastoss-dev.devops_reports.orphan_dataset_objects` o
   JOIN latest_exec USING (execution_id)
   GROUP BY
     o.execution_id,
@@ -109,7 +109,7 @@ ORDER BY
 /*
 WITH latest_exec AS (
   SELECT execution_id, execution_ts, environment
-  FROM `<GCP_PROJECT>.devops_reports.executions`
+  FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'orphan_datasets'
     AND status      = 'success'
   QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
@@ -125,7 +125,7 @@ SELECT
   SUM(d.table_count)                     AS total_tables,
   ROUND(AVG(d.risk_score), 1)            AS avg_risk_score,
   MAX(d.risk_score)                      AS max_risk_score
-FROM `<GCP_PROJECT>.devops_reports.orphan_datasets` d
+FROM `tefde-gcp-fastoss-dev.devops_reports.orphan_datasets` d
 JOIN latest_exec e USING (execution_id)
 GROUP BY
   e.execution_ts, e.environment, d.orphan_status, d.project_id
@@ -142,7 +142,7 @@ ORDER BY
 /*
 WITH latest_exec AS (
   SELECT execution_id, execution_ts, environment
-  FROM `<GCP_PROJECT>.devops_reports.executions`
+  FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'orphan_datasets'
     AND status      = 'success'
   QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
@@ -150,7 +150,7 @@ WITH latest_exec AS (
 
 orphan_ds AS (
   SELECT execution_id, dataset_name, project_id, orphan_status, risk_score, owner
-  FROM `<GCP_PROJECT>.devops_reports.orphan_datasets`
+  FROM `tefde-gcp-fastoss-dev.devops_reports.orphan_datasets`
   JOIN latest_exec USING (execution_id)
 )
 
@@ -167,7 +167,7 @@ SELECT
   o.last_modified,
   o.row_count,
   ROUND(o.storage_mb, 4)       AS storage_mb
-FROM `<GCP_PROJECT>.devops_reports.orphan_dataset_objects` o
+FROM `tefde-gcp-fastoss-dev.devops_reports.orphan_dataset_objects` o
 JOIN latest_exec e USING (execution_id)
 JOIN orphan_ds ds
   ON  ds.execution_id = o.execution_id

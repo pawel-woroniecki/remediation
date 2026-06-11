@@ -7,7 +7,7 @@
  *           (shadow resources) and code objects not yet deployed.
  * Tables  : devops_reports.executions
  *           devops_reports.env_drift_findings
- * Usage   : Replace <GCP_PROJECT> with your GCP project ID.
+ * Usage   : Replace tefde-gcp-fastoss-dev with your GCP project ID.
  *           In Looker, register as a native derived table or run via SQL Runner.
  *           In Looker Studio, use as a Custom Query data source.
  *
@@ -30,7 +30,7 @@ WITH latest_exec AS (
     status,
     triggered_by,
     git_ref
-  FROM `<GCP_PROJECT>.devops_reports.executions`
+  FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'env_drift'
     AND status      = 'success'
   QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
@@ -54,7 +54,7 @@ findings AS (
       WHEN 'none'   THEN 4
       ELSE               5
     END                  AS severity_sort
-  FROM `<GCP_PROJECT>.devops_reports.env_drift_findings` f
+  FROM `tefde-gcp-fastoss-dev.devops_reports.env_drift_findings` f
   JOIN latest_exec USING (execution_id)
 ),
 
@@ -118,8 +118,8 @@ SELECT
   f.component_type,
   f.severity,
   COUNT(*) AS total_findings
-FROM `<GCP_PROJECT>.devops_reports.executions` e
-JOIN `<GCP_PROJECT>.devops_reports.env_drift_findings` f USING (execution_id)
+FROM `tefde-gcp-fastoss-dev.devops_reports.executions` e
+JOIN `tefde-gcp-fastoss-dev.devops_reports.env_drift_findings` f USING (execution_id)
 WHERE e.report_type = 'env_drift'
   AND e.status      = 'success'
 GROUP BY
@@ -143,7 +143,7 @@ ORDER BY
 /*
 WITH latest_exec AS (
   SELECT execution_id, execution_ts, environment, git_ref
-  FROM `<GCP_PROJECT>.devops_reports.executions`
+  FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'env_drift'
     AND status      = 'success'
   QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
@@ -161,7 +161,7 @@ SELECT
   f.severity,
   f.source_hash,
   f.env_hash
-FROM `<GCP_PROJECT>.devops_reports.env_drift_findings` f
+FROM `tefde-gcp-fastoss-dev.devops_reports.env_drift_findings` f
 JOIN latest_exec e USING (execution_id)
 ORDER BY
   CASE f.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,

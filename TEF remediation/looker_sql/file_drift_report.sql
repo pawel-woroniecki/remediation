@@ -7,7 +7,7 @@
  * Tables  : devops_reports.executions
  *           devops_reports.branch_drift_kpis
  *           devops_reports.branch_drift_evidence
- * Usage   : Replace <GCP_PROJECT> with your GCP project ID.
+ * Usage   : Replace tefde-gcp-fastoss-dev with your GCP project ID.
  *           In Looker, register as a native derived table or run via SQL Runner.
  *           In Looker Studio, use as a Custom Query data source.
  *
@@ -28,7 +28,7 @@ WITH latest_exec AS (
     environment,
     status,
     triggered_by
-  FROM `<GCP_PROJECT>.devops_reports.executions`
+  FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'file_drift'
     AND status      = 'success'
   QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
@@ -59,7 +59,7 @@ kpi_summary AS (
       WHEN 'none'   THEN 4
       ELSE               5
     END                          AS severity_sort
-  FROM `<GCP_PROJECT>.devops_reports.branch_drift_kpis` k
+  FROM `tefde-gcp-fastoss-dev.devops_reports.branch_drift_kpis` k
   JOIN latest_exec e USING (execution_id)
   WHERE k.drift_type = 'content'
     AND k.status     = 'ok'
@@ -79,7 +79,7 @@ evidence_agg AS (
     COUNT(DISTINCT ev.author)                                       AS distinct_authors,
     MIN(ev.commit_date)                                             AS earliest_change_date,
     MAX(ev.commit_date)                                             AS latest_change_date
-  FROM `<GCP_PROJECT>.devops_reports.branch_drift_evidence` ev
+  FROM `tefde-gcp-fastoss-dev.devops_reports.branch_drift_evidence` ev
   JOIN latest_exec USING (execution_id)
   WHERE ev.drift_type = 'content'
   GROUP BY
@@ -129,7 +129,7 @@ ORDER BY
 /*
 WITH latest_exec AS (
   SELECT execution_id, execution_ts, environment
-  FROM `<GCP_PROJECT>.devops_reports.executions`
+  FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'file_drift'
     AND status      = 'success'
   QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
@@ -146,7 +146,7 @@ SELECT
   ev.commit_sha           AS last_commit_sha,
   ev.commit_date          AS last_commit_date,
   ev.problem_statement
-FROM `<GCP_PROJECT>.devops_reports.branch_drift_evidence` ev
+FROM `tefde-gcp-fastoss-dev.devops_reports.branch_drift_evidence` ev
 JOIN latest_exec e USING (execution_id)
 WHERE ev.drift_type = 'content'
 ORDER BY
