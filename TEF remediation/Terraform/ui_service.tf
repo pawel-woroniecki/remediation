@@ -28,6 +28,7 @@ resource "google_cloud_run_v2_service" "reports_ui" {
   name     = "devops-reports-ui"
   location = var.region
   project  = var.project_id
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
 
   depends_on = [google_project_service.run]
 
@@ -76,13 +77,19 @@ resource "google_cloud_run_v2_service" "reports_ui" {
 # ---------------------------------------------------------------------------
 # Access control
 # ---------------------------------------------------------------------------
-# Currently open to all authenticated Google accounts.
-# To restrict to your organisation, replace "allAuthenticatedUsers" with:
+# Network layer: ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY" above restricts the
+# service to the Shared VPC / corporate network — there is no public URL.
+# Required by org policy constraints/run.allowedIngress, which blocks the
+# default INGRESS_TRAFFIC_ALL.
+#
+# Identity layer: roles/run.invoker below is currently open to all
+# authenticated Google accounts. To restrict to your organisation, replace
+# "allAuthenticatedUsers" with:
 #   "domain:yourcompany.com"           — everyone in a Google Workspace domain
 #   "group:team@yourcompany.com"       — a specific Google Group
 #   "user:alice@yourcompany.com"       — individual users
-# For proper browser SSO without sharing the URL publicly, add Google IAP
-# via an HTTPS load balancer (separate Terraform module).
+# For full browser-based SSO, add Google IAP via an internal HTTPS load
+# balancer (separate Terraform module) in front of this internal-only service.
 resource "google_cloud_run_v2_service_iam_member" "ui_invoker" {
   project  = var.project_id
   location = var.region

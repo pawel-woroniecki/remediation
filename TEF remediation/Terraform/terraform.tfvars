@@ -62,14 +62,11 @@ gitlab_base_url = "https://dot-portal.de.pri.o2.com/gitlab"
 gitlab_subgroup = "ndl_core"
 
 # ---------------------------------------------------------------------------
-# Networking — VPC, subnet, VPC Access Connector, firewall rules
+# Networking — Shared VPC connectivity (provisioned by the TEF Networking Team)
 # ---------------------------------------------------------------------------
-# IP CIDR of the private network hosting dot-portal.de.pri.o2.com.
-# Used to scope the egress firewall rule that allows HTTPS to GitLab.
-# Ask your network team for the correct range, e.g. "10.100.0.0/16".
-gitlab_network_cidr = "REPLACE_WITH_GITLAB_NETWORK_CIDR"
-
-# Optional overrides — defaults shown, change only if they conflict with
-# existing subnets in your VPC address space.
-# vpc_network_name      = "devops-reports-vpc"
-# connector_subnet_cidr = "10.8.0.0/28"
+# VPC Access Connector created by the Networking Team in europe-west3,
+# attached to the Shared VPC tefde-gcp-network-shared-ic-1-vpc-devlowapp
+# (host project: tefde-gcp-network-shared-ic-1). Looked up via a data
+# source — this workspace does not create or manage the VPC, subnet,
+# connector, or firewall rules.
+vpc_connector_name = "fastoss-dev-gke-connector"
