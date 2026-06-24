@@ -13,7 +13,7 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 | `Cloud Run Jobs.tf` | 4 Cloud Run Job resources (one per report type) |
 | `ui_service.tf` | UI Cloud Run Service + invoker IAM; run.developer binding commented out — managed by TEF IAM Team |
 | `artifact_registry.tf` | Artifact Registry Docker repository; IAM bindings commented out — managed by TEF IAM Team |
-| `networking.tf` | Dedicated VPC, subnet, VPC Access Connector, firewall rules |
+| `networking.tf` | Data source for the Networking Team's VPC Access Connector (Shared VPC) |
 | `apis.tf` | GCP API enablement for both projects |
 | `looker.tf` | Comment only — Looker Studio requires no service account |
 | `backend.tf` | Terraform state backend |
@@ -32,6 +32,7 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 | Cloud Run Jobs + UI Service | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | BigQuery dataset + tables | `reporting_project_id` | `tefde-gcp-fastoss-dev` |
 | Service account *(external)* | — | `tefde-gcp-resvadm-prod-backend` (TEF IAM Team) |
+| Shared VPC + connector *(external)* | — | `tefde-gcp-network-shared-ic-1` (TEF Networking Team) |
 
 ---
 
@@ -50,7 +51,7 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 | `ui_container_image` | — | yes | Full Docker image URI for the UI Cloud Run Service |
 | `gitlab_base_url` | `https://dot-portal.de.pri.o2.com/gitlab` | no | GitLab instance URL |
 | `gitlab_subgroup` | `ndl_core` | no | Subgroup scanned by reports |
-| `gitlab_network_cidr` | — | yes | CIDR of the network hosting the GitLab instance |
+| `vpc_connector_name` | `fastoss-dev-gke-connector` | no | Name of the VPC Access Connector provisioned by the Networking Team |
 | `artifact_registry_repo_id` | `devops-reports` | no | Artifact Registry repository ID |
 | `bq_scan_project_id` | — | yes | BigQuery project scanned by the orphan datasets report |
 | `ui_invoker_member` | `allAuthenticatedUsers` | no | IAM member allowed to invoke the UI (use `domain:yourcompany.com`) |
@@ -107,3 +108,20 @@ The TEF IAM Team applies the grants listed in `../IAM_admin_instructions.md`.
 
 The Terraform deployer identity must hold `roles/iam.serviceAccountUser` on this SA
 (Grant #10 in `IAM_admin_instructions.md`) before running `terraform apply`.
+
+---
+
+## Networking
+
+Network connectivity is **provisioned and managed by the TEF Networking Team**.
+This workspace does not create a VPC, subnet, connector, or firewall rules —
+`networking.tf` only reads the existing VPC Access Connector via a data source.
+
+| Resource | Name | Project |
+|---|---|---|
+| Shared VPC network | `tefde-gcp-network-shared-ic-1-vpc-devlowapp` | `tefde-gcp-network-shared-ic-1` (host) |
+| Subnet | `s-shared-ew3-devlow-fastoss-dev-gke-connect-1` (europe-west3) | `tefde-gcp-network-shared-ic-1` (host) |
+| VPC Access Connector | `fastoss-dev-gke-connector` (europe-west3) | `tefde-gcp-fastoss-dev-gke` |
+
+If the Networking Team renames or recreates the connector, update `vpc_connector_name`
+in `terraform.tfvars` to match.

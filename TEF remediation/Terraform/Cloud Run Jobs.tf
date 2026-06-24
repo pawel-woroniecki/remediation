@@ -74,7 +74,7 @@ resource "google_cloud_run_v2_job" "orphan_datasets" {
       }
 
       vpc_access {
-        connector = google_vpc_access_connector.devops_reports.id
+        connector = data.google_vpc_access_connector.devops_reports.id
         egress    = "ALL_TRAFFIC"
       }
     }
@@ -133,7 +133,7 @@ resource "google_cloud_run_v2_job" "env_drift" {
       }
 
       vpc_access {
-        connector = google_vpc_access_connector.devops_reports.id
+        connector = data.google_vpc_access_connector.devops_reports.id
         egress    = "ALL_TRAFFIC"
       }
     }
@@ -192,7 +192,7 @@ resource "google_cloud_run_v2_job" "commit_drift" {
       }
 
       vpc_access {
-        connector = google_vpc_access_connector.devops_reports.id
+        connector = data.google_vpc_access_connector.devops_reports.id
         egress    = "ALL_TRAFFIC"
       }
     }
@@ -251,7 +251,7 @@ resource "google_cloud_run_v2_job" "file_drift" {
       }
 
       vpc_access {
-        connector = google_vpc_access_connector.devops_reports.id
+        connector = data.google_vpc_access_connector.devops_reports.id
         egress    = "ALL_TRAFFIC"
       }
     }

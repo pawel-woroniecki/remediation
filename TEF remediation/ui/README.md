@@ -195,7 +195,9 @@ gcloud run services describe devops-reports-ui \
   --format="value(status.url)"
 ```
 
-Open the printed URL in a browser. Access is restricted to `domain:telefonica.de` accounts.
+Open the printed URL in a browser. Access is restricted in two layers:
+- **Network (ingress):** the service is configured with `ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"` (required by the org policy `constraints/run.allowedIngress`), so the URL only resolves from inside the Shared VPC / corporate network (e.g. over VPN, Interconnect, or another VPC-connected resource) — it is not reachable from the public internet.
+- **Identity (IAM):** `roles/run.invoker` is restricted to `domain:telefonica.de` accounts.
 
 ---
 
@@ -221,7 +223,15 @@ The UI has no access to Secret Manager. The GitLab PAT is never visible to the U
 
 ## Access Control
 
-The Cloud Run Service is restricted to authenticated users in the `telefonica.de` Google Workspace domain, configured in `terraform.tfvars`:
+The Cloud Run Service is restricted at the network layer to internal traffic only:
+
+```hcl
+ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+```
+
+This satisfies the org policy `constraints/run.allowedIngress`, which blocks the public-internet default (`INGRESS_TRAFFIC_ALL`). It also means the UI is only reachable from inside the Shared VPC / corporate network — there is no public URL.
+
+On top of network restriction, the service is also restricted to authenticated users in the `telefonica.de` Google Workspace domain, configured in `terraform.tfvars`:
 
 ```hcl
 ui_invoker_member = "domain:telefonica.de"
@@ -232,7 +242,7 @@ To further restrict to a specific group:
 ui_invoker_member = "group:devops-team@telefonica.de"
 ```
 
-For full browser-based SSO with a login page and reliable `triggered_by` audit logging, add Google Identity-Aware Proxy (IAP) via an HTTPS load balancer. Without IAP, the `triggered_by` field in BigQuery can be spoofed by direct API callers.
+For full browser-based SSO with a login page and reliable `triggered_by` audit logging, add Google Identity-Aware Proxy (IAP) via an internal HTTPS load balancer (consistent with the `INGRESS_TRAFFIC_INTERNAL_ONLY` setting above). Without IAP, the `triggered_by` field in BigQuery can be spoofed by direct API callers.
 
 ---
 

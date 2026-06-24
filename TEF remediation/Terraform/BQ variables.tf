@@ -51,21 +51,10 @@ variable "gitlab_subgroup" {
   description = "GitLab subgroup name scanned by env_drift, commit_drift, and file_drift reports."
 }
 
-variable "vpc_network_name" {
+variable "vpc_connector_name" {
   type        = string
-  default     = "devops-reports-vpc"
-  description = "Name of the dedicated VPC network created for Cloud Run Jobs to reach the private GitLab instance."
-}
-
-variable "connector_subnet_cidr" {
-  type        = string
-  default     = "10.8.0.0/28"
-  description = "CIDR range for the VPC Access Connector subnet. Must be /28 and must not overlap with other subnets in the VPC."
-}
-
-variable "gitlab_network_cidr" {
-  type        = string
-  description = "IP CIDR of the private network hosting the GitLab instance (dot-portal.de.pri.o2.com). Scopes the egress firewall rule that allows HTTPS traffic to GitLab."
+  default     = "fastoss-dev-gke-connector"
+  description = "Name of the VPC Access Connector provisioned by the TEF Networking Team in europe-west3, attached to the Shared VPC tefde-gcp-network-shared-ic-1-vpc-devlowapp. Looked up via a data source — not created by this workspace."
 }
 
 variable "artifact_registry_repo_id" {

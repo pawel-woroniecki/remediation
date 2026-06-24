@@ -59,9 +59,11 @@ A cloud-native reporting framework that detects drift and governance gaps across
 
 | Resource | Project |
 |---|---|
-| Cloud Run Jobs, UI Service, GCS, Secret Manager, Service Account, Artifact Registry | `tefde-gcp-fastoss-dev-gke` |
+| Cloud Run Jobs, UI Service, GCS, Secret Manager, Artifact Registry | `tefde-gcp-fastoss-dev-gke` |
 | BigQuery dataset and tables | `tefde-gcp-fastoss-dev` |
 | BigQuery datasets scanned for orphans | `tefde-gcp-fastoss-prod` |
+| Service account *(external, TEF IAM Team)* | `tefde-gcp-resvadm-prod-backend` |
+| Shared VPC host *(external, TEF Networking Team)* | `tefde-gcp-network-shared-ic-1` |
 
 ---
 
@@ -109,9 +111,9 @@ TEF remediation/
     ├── BQ variables.tf       # All input variables
     ├── BQ DS + Tables.tf     # Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true); IAM bindings commented out — managed by TEF IAM Team
     ├── Cloud Run Jobs.tf     # 4 Cloud Run Job resources (VPC egress via connector)
-    ├── ui_service.tf         # UI Cloud Run Service + IAM (restricted to domain:telefonica.de)
-    ├── artifact_registry.tf  # Artifact Registry repo + IAM
-    ├── networking.tf         # Dedicated VPC, subnet, VPC Access Connector, firewall rules
+    ├── ui_service.tf         # UI Cloud Run Service (internal ingress only) + IAM (restricted to domain:telefonica.de)
+    ├── artifact_registry.tf  # Artifact Registry repo; IAM bindings commented out — managed by TEF IAM Team
+    ├── networking.tf         # Data source for the Networking Team's VPC Access Connector (Shared VPC)
     ├── apis.tf               # GCP API enablement (both projects)
     ├── looker.tf             # Comment only — Looker Studio needs no SA
     ├── backend.tf            # Terraform state backend
@@ -123,13 +125,18 @@ TEF remediation/
 
 ## Deployment Steps
 
-### 1. Fill in required placeholder values in `terraform.tfvars`
+### 1. Confirm networking is provisioned
 
-Before applying Terraform, set the GitLab network CIDR:
+Networking is provisioned externally by the TEF Networking Team — this Terraform
+workspace only reads the existing VPC Access Connector via a data source:
 
 ```hcl
-gitlab_network_cidr = "10.x.x.x/xx"   # ask your network team
+vpc_connector_name = "fastoss-dev-gke-connector"   # already set in terraform.tfvars
 ```
+
+The connector is attached to the Shared VPC `tefde-gcp-network-shared-ic-1-vpc-devlowapp`
+(host project `tefde-gcp-network-shared-ic-1`). No further action is required unless
+the Networking Team renames or recreates the connector.
 
 ### 2. Terraform apply
 
@@ -221,7 +228,7 @@ GitLab CI creates the release object automatically from the annotated tag messag
 
 ## BigQuery Reporting Model
 
-All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`. All tables have `deletion_protection = true`.
+All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`. All tables have `deletion_protection = true` except the `execution_daily_summary` view, which has no underlying storage to protect.
 
 | Table / View | Purpose |
 |---|---|
@@ -256,9 +263,10 @@ See `IAM_admin_instructions.md` for the full list of IAM grants required.
 - No credentials baked into Docker images
 - GitLab PAT stored in **GCP Secret Manager**, fetched at runtime; redacted from git subprocess error output before reaching Cloud Logging
 - Cloud Run Jobs and UI use **Workload Identity** — no long-lived credentials at runtime
-- UI access restricted to **`domain:telefonica.de`** Google Workspace accounts
+- UI Cloud Run Service ingress restricted to **internal traffic only** (`INGRESS_TRAFFIC_INTERNAL_ONLY`), required by org policy `constraints/run.allowedIngress` — no public URL exists
+- UI access additionally restricted to **`domain:telefonica.de`** Google Workspace accounts via IAM
 - Trivy scans for HIGH/CRITICAL CVEs on every image build, blocking push on findings
 - BigQuery tables protected with `deletion_protection = true`
-- Dedicated VPC with explicit-deny egress — only GitLab CIDR and Google APIs permitted
+- Network connectivity (Shared VPC, subnet, VPC Access Connector, firewall/egress policy) is provisioned and managed centrally by the TEF Networking Team
 - `EXECUTION_ID` dedup guard prevents double-writes on Cloud Run retries
 - `EXECUTION_ID` is auto-generated per run (UUID4 via Python)
