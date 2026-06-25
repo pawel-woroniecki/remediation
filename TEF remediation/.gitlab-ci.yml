@@ -17,8 +17,8 @@ variables:
 #
 # Generate the key once after terraform apply:
 #   gcloud iam service-accounts keys create runner-key.json \
-#     --iam-account=devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com \
-#     --project=tefde-gcp-resvadm-prod-backend
+#     --iam-account=devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
+#     --project=tefde-gcp-fastoss-dev-gke
 # Then add the contents of runner-key.json as the GCP_SA_KEY CI variable.
 #
 # To upgrade to keyless Workload Identity Federation (no long-lived keys):

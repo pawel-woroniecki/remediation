@@ -17,8 +17,8 @@ reports_gcs_bucket  = "tefde-gcp-fastoss-dev-gcs-devops-reports"
 # Image pushes from CI/CD use the devops-reports-runner SA (see artifact_registry.tf).
 # Generate a key for that SA and store it as GCP_SA_KEY in GitLab CI variables:
 #   gcloud iam service-accounts keys create runner-key.json \
-#     --iam-account=devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com \
-#     --project=tefde-gcp-resvadm-prod-backend
+#     --iam-account=devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
+#     --project=tefde-gcp-fastoss-dev-gke
 artifact_registry_repo_id = "devops-reports"
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ ui_invoker_member = "domain:telefonica.de"
 # Service account
 # ---------------------------------------------------------------------------
 # The SA is created by the IAM team — do not modify this value.
-cloud_run_sa_email = "devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
+cloud_run_sa_email = "devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
 
 # ---------------------------------------------------------------------------
 # Secret Manager
