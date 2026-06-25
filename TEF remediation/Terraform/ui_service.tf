@@ -8,7 +8,7 @@
 
 # Trigger Cloud Run Jobs and read execution status (needed by the UI backend)
 # NOTE: IAM binding managed by the TEF IAM Team.
-# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# The service account devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
 # is owned by that team. This resource is kept here for documentation purposes only.
 # Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
 # resource "google_project_iam_member" "reports_runner_run_developer" {
@@ -28,7 +28,7 @@ resource "google_cloud_run_v2_service" "reports_ui" {
   name     = "devops-reports-ui"
   location = var.region
   project  = var.project_id
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+  ingress  = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 
   depends_on = [google_project_service.run]
 
@@ -77,10 +77,13 @@ resource "google_cloud_run_v2_service" "reports_ui" {
 # ---------------------------------------------------------------------------
 # Access control
 # ---------------------------------------------------------------------------
-# Network layer: ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY" above restricts the
-# service to the Shared VPC / corporate network — there is no public URL.
-# Required by org policy constraints/run.allowedIngress, which blocks the
-# default INGRESS_TRAFFIC_ALL.
+# Network layer: ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" above
+# restricts the service to traffic from inside the VPC and from Google
+# Cloud HTTP(S) Load Balancers backed by this service — there is no direct
+# public URL. This is the only value allowed by the org policy
+# constraints/run.allowedIngress ("internal-and-cloud-load-balancing"),
+# which blocks the default INGRESS_TRAFFIC_ALL and also blocks
+# INGRESS_TRAFFIC_INTERNAL_ONLY.
 #
 # Identity layer: roles/run.invoker below is currently open to all
 # authenticated Google accounts. To restrict to your organisation, replace
@@ -89,7 +92,7 @@ resource "google_cloud_run_v2_service" "reports_ui" {
 #   "group:team@yourcompany.com"       — a specific Google Group
 #   "user:alice@yourcompany.com"       — individual users
 # For full browser-based SSO, add Google IAP via an internal HTTPS load
-# balancer (separate Terraform module) in front of this internal-only service.
+# balancer (separate Terraform module) in front of this service.
 resource "google_cloud_run_v2_service_iam_member" "ui_invoker" {
   project  = var.project_id
   location = var.region

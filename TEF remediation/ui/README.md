@@ -196,14 +196,14 @@ gcloud run services describe devops-reports-ui \
 ```
 
 Open the printed URL in a browser. Access is restricted in two layers:
-- **Network (ingress):** the service is configured with `ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"` (required by the org policy `constraints/run.allowedIngress`), so the URL only resolves from inside the Shared VPC / corporate network (e.g. over VPN, Interconnect, or another VPC-connected resource) — it is not reachable from the public internet.
+- **Network (ingress):** the service is configured with `ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"` (the only value allowed by org policy `constraints/run.allowedIngress`), so the URL only resolves from inside the Shared VPC / corporate network, or via a Google Cloud HTTP(S) Load Balancer backed by this service — it is not reachable directly from the public internet.
 - **Identity (IAM):** `roles/run.invoker` is restricted to `domain:telefonica.de` accounts.
 
 ---
 
 ## IAM — Service Account
 
-The UI runs as `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com` — the same service account used by the Cloud Run Jobs.
+The UI runs as `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com` — the same service account used by the Cloud Run Jobs.
 
 > **The service account is created and owned by the TEF IAM Team.** All IAM binding resources in Terraform are commented out for reference only. The TEF IAM Team applies the actual grants. See `IAM_admin_instructions.md` for the full list.
 
@@ -223,13 +223,13 @@ The UI has no access to Secret Manager. The GitLab PAT is never visible to the U
 
 ## Access Control
 
-The Cloud Run Service is restricted at the network layer to internal traffic only:
+The Cloud Run Service is restricted at the network layer to internal traffic and Cloud Load Balancing:
 
 ```hcl
-ingress = "INGRESS_TRAFFIC_INTERNAL_ONLY"
+ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
 ```
 
-This satisfies the org policy `constraints/run.allowedIngress`, which blocks the public-internet default (`INGRESS_TRAFFIC_ALL`). It also means the UI is only reachable from inside the Shared VPC / corporate network — there is no public URL.
+This is the only value allowed by the org policy `constraints/run.allowedIngress` (`internal-and-cloud-load-balancing`); both the default `INGRESS_TRAFFIC_ALL` and the more restrictive `INGRESS_TRAFFIC_INTERNAL_ONLY` are rejected. In practice the UI is reachable from inside the Shared VPC / corporate network, or through a Google Cloud HTTP(S) Load Balancer configured with this service as a backend — there is no direct public URL.
 
 On top of network restriction, the service is also restricted to authenticated users in the `telefonica.de` Google Workspace domain, configured in `terraform.tfvars`:
 
@@ -242,7 +242,7 @@ To further restrict to a specific group:
 ui_invoker_member = "group:devops-team@telefonica.de"
 ```
 
-For full browser-based SSO with a login page and reliable `triggered_by` audit logging, add Google Identity-Aware Proxy (IAP) via an internal HTTPS load balancer (consistent with the `INGRESS_TRAFFIC_INTERNAL_ONLY` setting above). Without IAP, the `triggered_by` field in BigQuery can be spoofed by direct API callers.
+For full browser-based SSO with a login page and reliable `triggered_by` audit logging, add Google Identity-Aware Proxy (IAP) via an internal HTTPS load balancer — this is also how the service would be fronted for the `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` setting above. Without IAP, the `triggered_by` field in BigQuery can be spoofed by direct API callers.
 
 ---
 

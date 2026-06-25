@@ -59,10 +59,9 @@ A cloud-native reporting framework that detects drift and governance gaps across
 
 | Resource | Project |
 |---|---|
-| Cloud Run Jobs, UI Service, GCS, Secret Manager, Artifact Registry | `tefde-gcp-fastoss-dev-gke` |
+| Cloud Run Jobs, UI Service, GCS, Secret Manager, Artifact Registry, Service Account *(external, TEF IAM Team)* | `tefde-gcp-fastoss-dev-gke` |
 | BigQuery dataset and tables | `tefde-gcp-fastoss-dev` |
 | BigQuery datasets scanned for orphans | `tefde-gcp-fastoss-prod` |
-| Service account *(external, TEF IAM Team)* | `tefde-gcp-resvadm-prod-backend` |
 | Shared VPC host *(external, TEF Networking Team)* | `tefde-gcp-network-shared-ic-1` |
 
 ---
@@ -111,7 +110,7 @@ TEF remediation/
     ├── BQ variables.tf       # All input variables
     ├── BQ DS + Tables.tf     # Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true); IAM bindings commented out — managed by TEF IAM Team
     ├── Cloud Run Jobs.tf     # 4 Cloud Run Job resources (VPC egress via connector)
-    ├── ui_service.tf         # UI Cloud Run Service (internal ingress only) + IAM (restricted to domain:telefonica.de)
+    ├── ui_service.tf         # UI Cloud Run Service (internal + LB ingress only) + IAM (restricted to domain:telefonica.de)
     ├── artifact_registry.tf  # Artifact Registry repo; IAM bindings commented out — managed by TEF IAM Team
     ├── networking.tf         # Data source for the Networking Team's VPC Access Connector (Shared VPC)
     ├── apis.tf               # GCP API enablement (both projects)
@@ -159,12 +158,12 @@ The PAT requires `read_api` and `read_repository` scopes. Prefer a **Group Acces
 
 ### 4. Create a key for `devops-reports-runner` (used by CI/CD to push images)
 
-> **Note:** The service account `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com` is created and owned by the **TEF IAM Team**. Request the key from that team or ask them to generate it.
+> **Note:** The service account `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com` is created and owned by the **TEF IAM Team**. Request the key from that team or ask them to generate it.
 
 ```bash
 gcloud iam service-accounts keys create runner-key.json \
-  --iam-account=devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com \
-  --project=tefde-gcp-resvadm-prod-backend
+  --iam-account=devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
+  --project=tefde-gcp-fastoss-dev-gke
 ```
 
 Add the contents of `runner-key.json` as the `GCP_SA_KEY` **masked** variable in GitLab CI/CD settings, then delete the local file. See `.gitlab-ci.yml` for the Workload Identity Federation upgrade path that eliminates this key.
@@ -245,7 +244,7 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`. All tables
 
 ## Service Account
 
-A single service account `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com` is used for:
+A single service account `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com` is used for:
 - Cloud Run Jobs runtime (Workload Identity — no key required)
 - UI Cloud Run Service runtime (Workload Identity)
 - CI/CD image pushes to Artifact Registry (JSON key stored as `GCP_SA_KEY` in GitLab CI)
@@ -263,7 +262,7 @@ See `IAM_admin_instructions.md` for the full list of IAM grants required.
 - No credentials baked into Docker images
 - GitLab PAT stored in **GCP Secret Manager**, fetched at runtime; redacted from git subprocess error output before reaching Cloud Logging
 - Cloud Run Jobs and UI use **Workload Identity** — no long-lived credentials at runtime
-- UI Cloud Run Service ingress restricted to **internal traffic only** (`INGRESS_TRAFFIC_INTERNAL_ONLY`), required by org policy `constraints/run.allowedIngress` — no public URL exists
+- UI Cloud Run Service ingress restricted to **internal traffic and Cloud Load Balancing** (`INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`), the only value allowed by org policy `constraints/run.allowedIngress` — no direct public URL exists
 - UI access additionally restricted to **`domain:telefonica.de`** Google Workspace accounts via IAM
 - Trivy scans for HIGH/CRITICAL CVEs on every image build, blocking push on findings
 - BigQuery tables protected with `deletion_protection = true`

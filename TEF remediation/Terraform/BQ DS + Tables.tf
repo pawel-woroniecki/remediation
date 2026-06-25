@@ -20,7 +20,7 @@ resource "google_secret_manager_secret" "gitlab_token" {
 }
 
 # NOTE: IAM binding managed by the TEF IAM Team.
-# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# The service account devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
 # is owned by that team. This resource is kept here for documentation purposes only.
 # Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
 # resource "google_secret_manager_secret_iam_member" "gitlab_token_accessor" {
@@ -48,7 +48,7 @@ resource "google_storage_bucket" "devops_reports" {
 }
 
 # NOTE: IAM binding managed by the TEF IAM Team.
-# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# The service account devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
 # is owned by that team. This resource is kept here for documentation purposes only.
 # Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
 # resource "google_storage_bucket_iam_member" "reports_runner_gcs_writer" {
@@ -61,7 +61,7 @@ resource "google_storage_bucket" "devops_reports" {
 # BigQuery IAM — dataset-level write + project-level job execution
 # ---------------------------------------------------------------------------
 # NOTE: IAM binding managed by the TEF IAM Team.
-# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# The service account devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
 # is owned by that team. This resource is kept here for documentation purposes only.
 # Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
 # resource "google_bigquery_dataset_iam_member" "reports_runner_editor" {
@@ -74,7 +74,7 @@ resource "google_storage_bucket" "devops_reports" {
 # bigquery.jobUser must be granted in the project where BQ jobs are executed,
 # which is the reporting project (where the dataset lives).
 # NOTE: IAM binding managed by the TEF IAM Team.
-# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# The service account devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
 # is owned by that team. This resource is kept here for documentation purposes only.
 # Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
 # resource "google_project_iam_member" "reports_runner_bq_job_user" {
@@ -89,7 +89,7 @@ resource "google_storage_bucket" "devops_reports" {
 # The orphan_datasets report scans a separate BigQuery project (typically prod)
 # for datasets not referenced by any repo. The runner SA needs read access there.
 # NOTE: IAM binding managed by the TEF IAM Team.
-# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# The service account devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
 # is owned by that team. This resource is kept here for documentation purposes only.
 # Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
 # resource "google_project_iam_member" "reports_runner_scan_bq_viewer" {
@@ -99,7 +99,7 @@ resource "google_storage_bucket" "devops_reports" {
 # }
 
 # NOTE: IAM binding managed by the TEF IAM Team.
-# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
+# The service account devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
 # is owned by that team. This resource is kept here for documentation purposes only.
 # Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
 # resource "google_project_iam_member" "reports_runner_scan_bq_job_user" {
