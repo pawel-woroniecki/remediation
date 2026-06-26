@@ -19,9 +19,12 @@ Permissions span three GCP projects:
 | `tefde-gcp-fastoss-dev` | Reporting project — BigQuery `devops_reports` dataset |
 | `tefde-gcp-fastoss-prod` | Scan project — BigQuery datasets inspected by the orphan datasets report |
 
-> **Note:** These bindings are normally applied automatically by
-> `terraform apply`. Use this document if you are applying permissions
-> manually, or to audit that the correct bindings are in place.
+> **Note:** None of these bindings are applied by `terraform apply` — every
+> corresponding `google_*_iam_member` resource in the Terraform files is
+> commented out. The service account itself is also created and owned by
+> the TEF IAM Team, not by this Terraform workspace. This document is the
+> authoritative list the TEF IAM Team applies manually; use it to apply the
+> grants or to audit that they're all in place.
 
 ---
 
@@ -29,18 +32,16 @@ Permissions span three GCP projects:
 
 Before granting any permissions:
 
-1. The service account must already exist. Verify with:
+1. The service account is created and owned by the TEF IAM Team — it must
+   already exist before any of the grants below can be applied. Verify with:
    ```bash
    gcloud iam service-accounts describe \
      devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
      --project=tefde-gcp-fastoss-dev-gke
    ```
-   If it does not exist, create it:
-   ```bash
-   gcloud iam service-accounts create devops-reports-runner \
-     --display-name="DevOps Reports Cloud Run Runner" \
-     --project=tefde-gcp-fastoss-dev-gke
-   ```
+   If it does not exist yet, request it from the TEF IAM Team rather than
+   creating it yourself — do not run `gcloud iam service-accounts create`
+   for this SA.
 
 2. You must hold one of the following roles on **each** project where you
    are granting permissions:
@@ -222,6 +223,49 @@ gcloud iam service-accounts add-iam-policy-binding \
 
 ---
 
+#### Grant 11 — Service Account IAM: allow Cloud Scheduler to mint tokens as the SA
+
+**Why:** The 4 report Cloud Run Jobs are triggered daily by Cloud Scheduler jobs
+(`scheduler.tf`), which call the Cloud Run Admin API's `RunJob` method using an
+OAuth token generated for `devops-reports-runner`. Cloud Scheduler doesn't use the
+SA's own credentials directly — Google's per-project Cloud Scheduler service agent
+must be granted permission to mint tokens on the SA's behalf. Without this grant,
+every scheduled invocation fails with a 403 at firing time (not at `terraform apply`
+time), so this is easy to miss until the first scheduled run.
+
+**Resource:** Service account `devops-reports-runner` in project `tefde-gcp-fastoss-dev-gke`
+**Role:** `roles/iam.serviceAccountTokenCreator`
+**Principal:** The Cloud Scheduler service agent —
+`serviceAccount:service-PROJECT_NUMBER@gcp-sa-cloudscheduler.iam.gserviceaccount.com`.
+Replace `PROJECT_NUMBER` with the project number of `tefde-gcp-fastoss-dev-gke`
+(find it with `gcloud projects describe tefde-gcp-fastoss-dev-gke --format="value(projectNumber)"`).
+This service agent is auto-created the first time `cloudscheduler.googleapis.com`
+is enabled on the project — confirm it exists before granting:
+```bash
+gcloud iam service-accounts describe \
+  service-PROJECT_NUMBER@gcp-sa-cloudscheduler.iam.gserviceaccount.com
+```
+
+**gcloud CLI:**
+```bash
+gcloud iam service-accounts add-iam-policy-binding \
+  devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --role=roles/iam.serviceAccountTokenCreator \
+  --member="serviceAccount:service-PROJECT_NUMBER@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+```
+
+**GCP Console:**
+1. Navigate to **IAM & Admin → Service Accounts** (project `tefde-gcp-fastoss-dev-gke`)
+2. Click on `devops-reports-runner`
+3. Select the **Permissions** tab
+4. Click **Grant Access**
+5. New principals: `service-PROJECT_NUMBER@gcp-sa-cloudscheduler.iam.gserviceaccount.com`
+6. Role: `Service Account Token Creator`
+7. Click **Save**
+
+---
+
 ### Project: `tefde-gcp-fastoss-dev`
 
 ---
@@ -354,6 +398,7 @@ gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
 | 8 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.metadataViewer` | `devops-reports-runner` SA |
 | 9 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.jobUser` | `devops-reports-runner` SA |
 | 10 | `tefde-gcp-fastoss-dev-gke` | SA `devops-reports-runner` (resource) | `roles/iam.serviceAccountUser` | Terraform deployer identity |
+| 11 | `tefde-gcp-fastoss-dev-gke` | SA `devops-reports-runner` (resource) | `roles/iam.serviceAccountTokenCreator` | Cloud Scheduler service agent |
 
 ---
 
@@ -365,6 +410,7 @@ each binding is in place.
 ```bash
 SA="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
 DEPLOYER="DEPLOYER_IDENTITY"   # replace with the identity that runs terraform apply
+SCHEDULER_AGENT="service-PROJECT_NUMBER@gcp-sa-cloudscheduler.iam.gserviceaccount.com"   # replace PROJECT_NUMBER
 
 # Grant 1 — Secret Manager
 gcloud secrets get-iam-policy gitlab-token \
@@ -404,6 +450,12 @@ gcloud iam service-accounts get-iam-policy \
   devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
   --project=tefde-gcp-fastoss-dev-gke \
   --format="table(bindings.role,bindings.members)" | grep "$DEPLOYER"
+
+# Grant 11 — serviceAccountTokenCreator for the Cloud Scheduler service agent
+gcloud iam service-accounts get-iam-policy \
+  devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --format="table(bindings.role,bindings.members)" | grep "$SCHEDULER_AGENT"
 ```
 
 Each command should return at least one line containing the relevant

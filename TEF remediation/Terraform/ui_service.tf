@@ -93,12 +93,26 @@ resource "google_cloud_run_v2_service" "reports_ui" {
 #   "user:alice@yourcompany.com"       — individual users
 # For full browser-based SSO, add Google IAP via an internal HTTPS load
 # balancer (separate Terraform module) in front of this service.
+# Workaround for a known terraform-provider-google eventual-consistency bug where applying
+# this IAM binding right after the Cloud Run service is created/replaced can fail with
+# "Provider produced inconsistent result after apply" (see hashicorp/terraform-provider-google
+# issues #16350, #19680, #20968, #22521). Re-triggers whenever the service is replaced.
+resource "time_sleep" "wait_for_ui_iam_propagation" {
+  depends_on      = [google_cloud_run_v2_service.reports_ui]
+  create_duration = "30s"
+
+  triggers = {
+    service_id = google_cloud_run_v2_service.reports_ui.id
+  }
+}
+
 resource "google_cloud_run_v2_service_iam_member" "ui_invoker" {
-  project  = var.project_id
-  location = var.region
-  name     = google_cloud_run_v2_service.reports_ui.name
-  role     = "roles/run.invoker"
-  member   = var.ui_invoker_member
+  project    = var.project_id
+  location   = var.region
+  name       = google_cloud_run_v2_service.reports_ui.name
+  role       = "roles/run.invoker"
+  member     = var.ui_invoker_member
+  depends_on = [time_sleep.wait_for_ui_iam_propagation]
 }
 
 # ---------------------------------------------------------------------------

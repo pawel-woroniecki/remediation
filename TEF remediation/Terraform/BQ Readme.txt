@@ -9,8 +9,9 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 | File | Contents |
 |---|---|
 | `BQ variables.tf` | All input variables |
-| `BQ DS + Tables.tf` | Secret Manager (europe-west3), GCS bucket, BigQuery dataset + 8 tables; IAM bindings commented out — managed by TEF IAM Team |
+| `BQ DS + Tables.tf` | Secret Manager, GCS bucket, BigQuery dataset + 8 tables — all pinned to `var.region` (europe-west3); IAM bindings commented out — managed by TEF IAM Team |
 | `Cloud Run Jobs.tf` | 4 Cloud Run Job resources (one per report type) |
+| `scheduler.tf` | Daily Cloud Scheduler triggers for the 4 report jobs; IAM binding commented out — managed by TEF IAM Team |
 | `ui_service.tf` | UI Cloud Run Service + invoker IAM; run.developer binding commented out — managed by TEF IAM Team |
 | `artifact_registry.tf` | Artifact Registry Docker repository; IAM bindings commented out — managed by TEF IAM Team |
 | `networking.tf` | Data source for the Networking Team's VPC Access Connector (Shared VPC) |
@@ -42,7 +43,7 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 |---|---|---|---|
 | `project_id` | — | yes | Cloud Run / infrastructure project |
 | `reporting_project_id` | — | yes | BigQuery reporting project |
-| `region` | `europe-west3` | no | GCP region (also used for Secret Manager replication) |
+| `region` | `europe-west3` | no | GCP region — also used as the location for Secret Manager replication, the GCS bucket, and the BigQuery dataset. Must stay a single region: org policy `constraints/gcp.resourceLocations` does not permit multi-region locations such as `EU` |
 | `dataset_id` | `devops_reports` | no | BigQuery dataset name |
 | `reports_gcs_bucket` | — | yes | GCS bucket name for CSV outputs |
 | `gitlab_token_secret_id` | `gitlab-token` | no | Secret Manager secret ID for GitLab PAT |
@@ -108,6 +109,35 @@ The TEF IAM Team applies the grants listed in `../IAM_admin_instructions.md`.
 
 The Terraform deployer identity must hold `roles/iam.serviceAccountUser` on this SA
 (Grant #10 in `IAM_admin_instructions.md`) before running `terraform apply`.
+
+Cloud Scheduler additionally requires `roles/iam.serviceAccountTokenCreator` on this SA,
+granted to the Cloud Scheduler service agent (Grant #11) — without it, the daily scheduled
+report runs fail with a 403 at firing time, not at `terraform apply` time.
+
+---
+
+## Scheduling
+
+The 4 report jobs run automatically once a day via `scheduler.tf`, with no manual/UI step
+required. Each `google_cloud_scheduler_job` calls the Cloud Run Admin API's `RunJob` method
+directly, authenticating as `devops-reports-runner` via an OAuth token (not OIDC — the target
+is `run.googleapis.com` itself, a Google API).
+
+| Job | Schedule (Europe/Berlin) |
+|---|---|
+| `devops-reports-orphan-datasets-trigger` | 05:00 |
+| `devops-reports-env-drift-trigger` | 05:10 |
+| `devops-reports-commit-drift-trigger` | 05:20 |
+| `devops-reports-file-drift-trigger` | 05:30 |
+
+Times are staggered 10 minutes apart to avoid simultaneous repo-clone load, and are set as
+`locals` in `scheduler.tf` — adjust them there if needed. To force-run a job immediately
+without waiting for its schedule:
+```bash
+gcloud scheduler jobs run devops-reports-orphan-datasets-trigger \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --location=europe-west3
+```
 
 ---
 

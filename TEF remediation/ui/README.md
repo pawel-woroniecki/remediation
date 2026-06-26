@@ -4,6 +4,8 @@ A lightweight web interface for triggering and monitoring the four DevOps govern
 
 The UI is a thin orchestration layer only — it has no business logic and does not touch scripts, BigQuery schemas, or GCS data directly.
 
+> All 4 reports also run automatically once a day via Cloud Scheduler (`Terraform/scheduler.tf`) — the UI is for on-demand/manual triggering and monitoring execution history, not required for routine reporting. See `Instructions/Running the Reports.md` for the end-user guide covering both.
+
 ---
 
 ## Architecture
@@ -250,4 +252,7 @@ For full browser-based SSO with a login page and reliable `triggered_by` audit l
 
 1. Add an entry to `reports.yaml` following the existing structure.
 2. Ensure the corresponding Cloud Run Job exists (add it to `Terraform/Cloud Run Jobs.tf` if not).
-3. Rebuild and push the UI image — no backend code changes required.
+3. If it should also run automatically, add a matching `google_cloud_scheduler_job` resource to
+   `Terraform/scheduler.tf` (copy the shape of an existing one, picking a schedule that doesn't
+   collide with the others).
+4. Rebuild and push the UI image — no backend code changes required.

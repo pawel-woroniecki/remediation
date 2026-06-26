@@ -54,6 +54,12 @@ resource "google_project_service" "cloudresourcemanager_gke" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "cloudscheduler" {
+  project            = var.project_id
+  service            = "cloudscheduler.googleapis.com"
+  disable_on_destroy = false
+}
+
 # --- Reporting project (tefde-gcp-fastoss-dev) ------------------------------
 
 resource "google_project_service" "bigquery" {

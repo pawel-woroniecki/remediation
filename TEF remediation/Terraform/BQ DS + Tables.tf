@@ -36,7 +36,7 @@ resource "google_secret_manager_secret" "gitlab_token" {
 resource "google_storage_bucket" "devops_reports" {
   name                        = var.reports_gcs_bucket
   project                     = var.project_id
-  location                    = "EU"
+  location                    = var.region
   uniform_bucket_level_access = true
 
   lifecycle_rule {
@@ -111,7 +111,7 @@ resource "google_storage_bucket" "devops_reports" {
 resource "google_bigquery_dataset" "devops_reports" {
   dataset_id = var.dataset_id
   project    = var.reporting_project_id
-  location   = "EU"
+  location   = var.region
   default_table_expiration_ms = 31536000000 # 365 days
 
   description = "Unified DevOps governance and drift reporting"

@@ -6,12 +6,16 @@ A cloud-native reporting framework that detects drift and governance gaps across
 
 ## Reports
 
-| # | Report | Script | Cloud Run job name |
-|---|---|---|---|
-| 1 | Commit-based branch drift | `git_branches_gap/report_branch_discrepancies_by_commit.py` | `devops-reports-commit-drift` |
-| 2 | File-content branch drift | `git_branches_gap/report_branch_discrepancies_by_content.py` | `devops-reports-file-drift` |
-| 3 | Environment vs code drift | `git_gcp_code_vs_environment_drift/generate_code_environment_drift_report.py` | `devops-reports-env-drift` |
-| 4 | Orphan BigQuery datasets | `bigquery_orphan_datasets/unmatched_bq_datasets_report.py` | `devops-reports-orphan-datasets` |
+All 4 reports run automatically every day via Cloud Scheduler (`scheduler.tf`), in addition to
+being triggerable manually via the UI or `gcloud run jobs execute`. Schedule times are
+`Europe/Berlin`.
+
+| # | Report | Script | Cloud Run job name | Daily schedule |
+|---|---|---|---|---|
+| 1 | Commit-based branch drift | `git_branches_gap/report_branch_discrepancies_by_commit.py` | `devops-reports-commit-drift` | 05:20 |
+| 2 | File-content branch drift | `git_branches_gap/report_branch_discrepancies_by_content.py` | `devops-reports-file-drift` | 05:30 |
+| 3 | Environment vs code drift | `git_gcp_code_vs_environment_drift/generate_code_environment_drift_report.py` | `devops-reports-env-drift` | 05:10 |
+| 4 | Orphan BigQuery datasets | `bigquery_orphan_datasets/unmatched_bq_datasets_report.py` | `devops-reports-orphan-datasets` | 05:00 |
 
 ---
 
@@ -110,6 +114,7 @@ TEF remediation/
     ├── BQ variables.tf       # All input variables
     ├── BQ DS + Tables.tf     # Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true); IAM bindings commented out — managed by TEF IAM Team
     ├── Cloud Run Jobs.tf     # 4 Cloud Run Job resources (VPC egress via connector)
+    ├── scheduler.tf          # Daily Cloud Scheduler triggers for the 4 report jobs; IAM binding commented out — managed by TEF IAM Team
     ├── ui_service.tf         # UI Cloud Run Service (internal + LB ingress only) + IAM (restricted to domain:telefonica.de)
     ├── artifact_registry.tf  # Artifact Registry repo; IAM bindings commented out — managed by TEF IAM Team
     ├── networking.tf         # Data source for the Networking Team's VPC Access Connector (Shared VPC)
@@ -227,7 +232,7 @@ GitLab CI creates the release object automatically from the annotated tag messag
 
 ## BigQuery Reporting Model
 
-All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`. All tables have `deletion_protection = true` except the `execution_daily_summary` view, which has no underlying storage to protect.
+All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`, located in `europe-west3` (single-region — the org policy `constraints/gcp.resourceLocations` does not permit multi-region locations like `EU`). All tables have `deletion_protection = true` except the `execution_daily_summary` view, which has no underlying storage to protect.
 
 | Table / View | Purpose |
 |---|---|
@@ -248,10 +253,11 @@ A single service account `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gs
 - Cloud Run Jobs runtime (Workload Identity — no key required)
 - UI Cloud Run Service runtime (Workload Identity)
 - CI/CD image pushes to Artifact Registry (JSON key stored as `GCP_SA_KEY` in GitLab CI)
+- Identity that Cloud Scheduler runs the 4 report jobs as, once a day
 
 > **The service account is created and owned by the TEF IAM Team.** It is not managed by this Terraform workspace. All IAM binding resources in Terraform are commented out for reference only — the TEF IAM Team applies the actual grants manually.
 
-The Terraform deployer identity also requires `roles/iam.serviceAccountUser` on the SA (Grant #10 in `IAM_admin_instructions.md`) to allow Cloud Run to be assigned this SA during `terraform apply`.
+The Terraform deployer identity also requires `roles/iam.serviceAccountUser` on the SA (Grant #10 in `IAM_admin_instructions.md`) to allow Cloud Run to be assigned this SA during `terraform apply`. Cloud Scheduler additionally requires `roles/iam.serviceAccountTokenCreator` on the SA, granted to the Cloud Scheduler service agent (Grant #11) — without it, daily scheduled runs fail with a 403 at firing time.
 
 See `IAM_admin_instructions.md` for the full list of IAM grants required.
 
@@ -266,6 +272,7 @@ See `IAM_admin_instructions.md` for the full list of IAM grants required.
 - UI access additionally restricted to **`domain:telefonica.de`** Google Workspace accounts via IAM
 - Trivy scans for HIGH/CRITICAL CVEs on every image build, blocking push on findings
 - BigQuery tables protected with `deletion_protection = true`
+- All BigQuery, GCS, and Secret Manager resources are pinned to the single region **`europe-west3`**, required by org policy `constraints/gcp.resourceLocations` — multi-region locations such as `EU` are not permitted
 - Network connectivity (Shared VPC, subnet, VPC Access Connector, firewall/egress policy) is provisioned and managed centrally by the TEF Networking Team
 - `EXECUTION_ID` dedup guard prevents double-writes on Cloud Run retries
 - `EXECUTION_ID` is auto-generated per run (UUID4 via Python)
