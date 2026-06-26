@@ -150,7 +150,12 @@ def normalize_text_content(content: str) -> str:
 def export_git_ref(repo_path: Path, git_ref: str, destination: Path) -> None:
     """Export a clean repository snapshot without modifying the working tree."""
     archive_path = destination / "source.zip"
-    run_command(["git", "-C", str(repo_path), "archive", "--format=zip", git_ref, "-o", str(archive_path)])
+    # Use the remote-tracking ref, not a bare branch name: clone_fastoss_b.py only
+    # checks out a local branch for whatever GitLab reports as the repo's default
+    # branch. For any other branch (e.g. "production" on a repo whose default
+    # branch is "main"), only origin/<branch> exists locally — a bare branch name
+    # would fail with "not a valid object name".
+    run_command(["git", "-C", str(repo_path), "archive", "--format=zip", f"origin/{git_ref}", "-o", str(archive_path)])
     with zipfile.ZipFile(archive_path, "r") as zip_handle:
         zip_handle.extractall(destination / "snapshot")
 
