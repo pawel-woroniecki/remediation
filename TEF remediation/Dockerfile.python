@@ -39,8 +39,13 @@ COPY entrypoint.sh /app/run-report
 RUN chmod +x /app/run-report
 
 # Default output location — override with --output-dir or OUTPUT_DIR env var.
+# HOME is set explicitly because appuser has no home directory (--no-create-home
+# below): without it, `gcloud storage cp` (used by stage_gcs_snapshot) tries to
+# write its config/log files under the nonexistent /home/appuser and fails with
+# "Permission denied" / "CommandLoadFailure".
 ENV OUTPUT_DIR=/workspace/outputs \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    HOME=/workspace
 
 # Run as non-root for defence-in-depth; workspace dir must be writable by this user.
 RUN groupadd --gid 1001 appuser && useradd --uid 1001 --gid 1001 --no-create-home appuser \
