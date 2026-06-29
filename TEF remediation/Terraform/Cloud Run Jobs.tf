@@ -19,6 +19,13 @@ locals {
   job_cpu         = "1"
   job_timeout     = "3600s"
   job_max_retries = 0
+
+  # env_drift runs multiple repos in parallel (entrypoint.sh caps concurrency via
+  # ENV_DRIFT_MAX_PARALLEL below) — needs more headroom than the single-process jobs,
+  # which previously shared job_memory/job_cpu and were getting OOM-killed.
+  env_drift_memory       = "4Gi"
+  env_drift_cpu          = "2"
+  env_drift_max_parallel = "5"
 }
 
 # ---------------------------------------------------------------------------
@@ -123,11 +130,15 @@ resource "google_cloud_run_v2_job" "env_drift" {
           name  = "SUBGROUP"
           value = var.gitlab_subgroup
         }
+        env {
+          name  = "ENV_DRIFT_MAX_PARALLEL"
+          value = local.env_drift_max_parallel
+        }
 
         resources {
           limits = {
-            memory = local.job_memory
-            cpu    = local.job_cpu
+            memory = local.env_drift_memory
+            cpu    = local.env_drift_cpu
           }
         }
       }

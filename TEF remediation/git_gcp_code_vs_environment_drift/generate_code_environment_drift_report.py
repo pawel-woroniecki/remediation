@@ -89,6 +89,10 @@ def ensure_exists(path: Path, label: str) -> None:
         raise FileNotFoundError(f"{label} not found: {path}")
 
 
+class BranchNotFoundError(Exception):
+    """Raised when the requested git ref does not exist on the repo's remote."""
+
+
 def sha256_text(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
@@ -149,13 +153,26 @@ def normalize_text_content(content: str) -> str:
 
 def export_git_ref(repo_path: Path, git_ref: str, destination: Path) -> None:
     """Export a clean repository snapshot without modifying the working tree."""
-    archive_path = destination / "source.zip"
     # Use the remote-tracking ref, not a bare branch name: clone_fastoss_b.py only
     # checks out a local branch for whatever GitLab reports as the repo's default
     # branch. For any other branch (e.g. "production" on a repo whose default
     # branch is "main"), only origin/<branch> exists locally — a bare branch name
     # would fail with "not a valid object name".
-    run_command(["git", "-C", str(repo_path), "archive", "--format=zip", f"origin/{git_ref}", "-o", str(archive_path)])
+    remote_ref = f"origin/{git_ref}"
+
+    # Some repos (e.g. staging/demo projects) never had this branch at all — that's
+    # an expected state, not a script bug. Check upfront so the caller can record a
+    # clean "skipped" outcome instead of an unhandled git failure.
+    exists = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "--verify", "--quiet", remote_ref],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if not exists:
+        raise BranchNotFoundError(f"{remote_ref} does not exist in {repo_path}")
+
+    archive_path = destination / "source.zip"
+    run_command(["git", "-C", str(repo_path), "archive", "--format=zip", remote_ref, "-o", str(archive_path)])
     with zipfile.ZipFile(archive_path, "r") as zip_handle:
         zip_handle.extractall(destination / "snapshot")
 
@@ -1139,6 +1156,30 @@ def main() -> int:
             shutil.copytree(snapshot_dir, report_root / "rendered_source_snapshot", dirs_exist_ok=True)
 
         log("INFO", "Report complete", path=str(report_root), **summary)
+        return 0
+
+    except BranchNotFoundError as exc:
+        # Expected for repos that never had this branch (e.g. staging/demo
+        # projects) — record it distinctly so it doesn't read as a failure.
+        status = "skipped"
+        log("WARNING", "Skipped — branch not found", execution_id=execution_id, reason=str(exc))
+        if bq_client is not None:
+            write_to_bigquery(
+                bq_client,
+                f"{reporting_project}.devops_reports.executions",
+                [{
+                    "execution_id": execution_id,
+                    "report_type": "env_drift",
+                    "execution_ts": datetime.now(timezone.utc).isoformat(),
+                    "environment": "prod",
+                    "git_ref": args.git_ref if args.source_mode == "branch" else None,
+                    "source_mode": args.source_mode,
+                    "triggered_by": triggered_by,
+                    "status": "skipped",
+                    "duration_seconds": int(time.monotonic() - start_time),
+                    "gcs_path": gcs_path,
+                }],
+            )
         return 0
 
     except Exception:

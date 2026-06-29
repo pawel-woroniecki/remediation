@@ -34,7 +34,7 @@ All files are uploaded to `gs://<reports-gcs-bucket>/<reports-gcs-prefix>/<execu
 | Table | What is written |
 |---|---|
 | `env_drift_findings` | One row per detected drift finding |
-| `executions` | One row per repo processed (`triggered_by`, `duration_seconds`, `status`, `gcs_path`) |
+| `executions` | One row per repo processed (`triggered_by`, `duration_seconds`, `status`, `gcs_path`). `status` is `success`, `failed`, or `skipped` (repo has no `--git-ref` branch — e.g. a staging/demo project with no `production` branch) |
 
 ---
 
@@ -42,7 +42,9 @@ All files are uploaded to `gs://<reports-gcs-bucket>/<reports-gcs-prefix>/<execu
 
 ### Inside Cloud Run (standard)
 
-Triggered automatically by `entrypoint.sh` as `env_drift` report type. All repos under `$SUBGROUP_ROOT` are processed **in parallel** — each repo gets its own background subshell and a fresh `EXECUTION_ID`, writing an independent row to the `executions` table.
+Triggered automatically by `entrypoint.sh` as `env_drift` report type. All repos under `$SUBGROUP_ROOT` are processed **in parallel**, capped at `ENV_DRIFT_MAX_PARALLEL` (default 5) repos at a time to avoid exhausting container memory — each repo gets its own background subshell and a fresh `EXECUTION_ID`, writing an independent row to the `executions` table. The Cloud Run Job for this report uses more memory/CPU than the other 3 jobs (4Gi/2 CPU vs 2Gi/1 CPU — see `Cloud Run Jobs.tf`) precisely because of this parallelism.
+
+If a repo has no branch matching `--git-ref` (e.g. `production` doesn't exist on a staging/demo project), the script records `status = "skipped"` for that repo instead of failing — this is expected, not an error to investigate.
 
 ### Locally
 
@@ -93,6 +95,7 @@ python generate_code_environment_drift_report.py \
 |---|---|
 | `EXECUTION_ID` | Regenerated per repo by `entrypoint.sh` inside the `env_drift` loop — each repo gets its own UUID and its own `executions` row. |
 | `TRIGGERED_BY` | Identity of the user who triggered the run; injected by the UI from the IAP header. Defaults to `"ui"`. |
+| `ENV_DRIFT_MAX_PARALLEL` | Max number of repos `entrypoint.sh` processes concurrently. Default `5`; set via Terraform in `Cloud Run Jobs.tf`. |
 | `NEXUS_USER` | Nexus username (only for `--source-mode nexus`) |
 | `NEXUS_PASSWORD` | Nexus password (only for `--source-mode nexus`) |
 

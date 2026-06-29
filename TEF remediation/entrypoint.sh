@@ -76,7 +76,11 @@ case "$REPORT_TYPE" in
             exit 1
         fi
 
-        log_json "INFO" "Phase 2: running env_drift for each repo in $SUBGROUP_ROOT (parallel)"
+        # Cap concurrency — running every repo at once exhausts container memory
+        # once the subgroup grows past a handful of repos (OOM-killed processes,
+        # no clean error). Override via the ENV_DRIFT_MAX_PARALLEL env var.
+        MAX_PARALLEL="${ENV_DRIFT_MAX_PARALLEL:-5}"
+        log_json "INFO" "Phase 2: running env_drift for each repo in $SUBGROUP_ROOT (parallel, max $MAX_PARALLEL at a time)"
         WORK_TMPDIR=$(mktemp -d)
         # Clean up temp dir on any exit — including signals and set -e triggers.
         trap 'rm -rf "$WORK_TMPDIR"' EXIT
@@ -85,6 +89,14 @@ case "$REPORT_TYPE" in
         for repo_path in "$SUBGROUP_ROOT"/*/; do
             [[ -d "$repo_path/.git" ]] || continue
             project_name=$(basename "$repo_path")
+
+            # Throttle: wait for a free slot before launching another repo.
+            # "|| true" prevents set -e from triggering when the job we waited
+            # on exited non-zero — failures are handled via the .exit file, not here.
+            while [[ "$(jobs -rp | wc -l)" -ge "$MAX_PARALLEL" ]]; do
+                wait -n || true
+            done
+
             (
                 # Fresh EXECUTION_ID per repo so each product gets its own audit row.
                 EXECUTION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
