@@ -194,5 +194,6 @@ account key is required — Looker Studio uses your own Google identity.
 | Job fails immediately with `Secret ... not found or has no versions` | The `gitlab-token` secret has no value loaded yet | `gcloud secrets versions add gitlab-token --project=tefde-gcp-fastoss-dev-gke --data-file=- <<< "YOUR_GITLAB_PAT"` |
 | Scheduled run never seems to fire / fails silently | Grant #11 (`roles/iam.serviceAccountTokenCreator` for the Cloud Scheduler service agent) hasn't been applied yet by the TEF IAM Team | Ask the IAM Team to confirm Grant #11 in `IAM_admin_instructions.md` is in place |
 | UI shows "Error: Not Found" in browser | You're not on the corporate network/VPN — the UI's ingress is internal-only by design | Connect to the corporate network/VPN, then retry |
-| Job fails with a permission/403 error | One of the IAM grants in `IAM_admin_instructions.md` is missing | Ask the TEF IAM Team to verify the relevant grant |
+| Job fails with a permission/403 error | One of the IAM grants in `IAM_admin_instructions.md` is missing | Ask the TEF IAM Team to verify the relevant grant (currently 12 grants documented) |
+| env_drift `executions` rows show `status = skipped` for some repos | Expected — repos without a `production` branch (e.g. staging/demo projects) are skipped cleanly; not an error | No action needed; monitor `status = failed` rows instead |
 | Need to know which report ran most recently | — | Check the BigQuery query above, or `gcloud run jobs executions list --job=<job-name> --project=tefde-gcp-fastoss-dev-gke --region=europe-west3` |

@@ -106,7 +106,10 @@ python generate_code_environment_drift_report.py \
 - `git` available in PATH
 - `gcloud` installed and authenticated (or running under Workload Identity in Cloud Run)
 - BigQuery metadata access to the target project
-- GCS read access to the Composer bucket
+- GCS read access (`roles/storage.objectViewer`) to the Composer bucket named in each repo's
+  `.gitlab-ci.yml` (`GCP_BUCKET`) — e.g. `fastoss-prod-composer-3` in
+  `tefde-gcp-fastoss-prod-gke`. See Grant #12 in `IAM_admin_instructions.md`. Without this,
+  `stage_gcs_snapshot()` fails with a 403 from `gcloud storage cp`.
 - `curl` available in PATH when using the default REST client
 
 ---

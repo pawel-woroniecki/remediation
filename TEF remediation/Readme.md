@@ -66,6 +66,7 @@ being triggerable manually via the UI or `gcloud run jobs execute`. Schedule tim
 | Cloud Run Jobs, UI Service, GCS, Secret Manager, Artifact Registry, Service Account *(external, TEF IAM Team)* | `tefde-gcp-fastoss-dev-gke` |
 | BigQuery dataset and tables | `tefde-gcp-fastoss-dev` |
 | BigQuery datasets scanned for orphans | `tefde-gcp-fastoss-prod` |
+| Cloud Composer bucket read by env_drift *(external, TEF IAM Team grant)* | `tefde-gcp-fastoss-prod-gke` |
 | Shared VPC host *(external, TEF Networking Team)* | `tefde-gcp-network-shared-ic-1` |
 
 ---
@@ -74,8 +75,8 @@ being triggerable manually via the UI or `gcloud run jobs execute`. Schedule tim
 
 ```
 TEF remediation/
-├── Dockerfile.python                        # Single image for all 4 Cloud Run Jobs
-├── entrypoint.sh                            # Routes report type → script; env_drift runs repos in parallel
+├── Dockerfile.python                        # Single image for all 4 Cloud Run Jobs; sets HOME=/workspace for non-root gcloud access
+├── entrypoint.sh                            # Routes report type → script; env_drift runs repos in parallel (capped at ENV_DRIFT_MAX_PARALLEL, default 5)
 ├── .gitlab-ci.yml                           # CI: build + Trivy scan + Terraform plan + GitLab release
 ├── .gitignore                               # Excludes tfstate, SA key files, Python artefacts
 ├── requirements.txt                         # Python dependencies
@@ -236,7 +237,7 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`, located in
 
 | Table / View | Purpose |
 |---|---|
-| `executions` | One row per job run: `triggered_by`, `duration_seconds`, `status`, `gcs_path` |
+| `executions` | One row per job run: `triggered_by`, `duration_seconds`, `gcs_path`, and `status` (`success` / `failed` / `skipped` — env_drift writes `skipped` for repos that have no `production` branch, which is expected for staging/demo projects) |
 | `branch_drift_kpis` | Commit/file drift counts per repo × direction |
 | `branch_drift_evidence` | Individual commits/files driving the drift |
 | `env_drift_findings` | Code vs environment discrepancies |

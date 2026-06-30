@@ -11,13 +11,14 @@ Reports solution to function correctly.
 devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
 ```
 
-Permissions span three GCP projects:
+Permissions span four GCP projects:
 
 | GCP Project | Role in the solution |
 |---|---|
 | `tefde-gcp-fastoss-dev-gke` | Compute project — Cloud Run Jobs, UI Service, GCS bucket, Secret Manager, Artifact Registry |
 | `tefde-gcp-fastoss-dev` | Reporting project — BigQuery `devops_reports` dataset |
 | `tefde-gcp-fastoss-prod` | Scan project — BigQuery datasets inspected by the orphan datasets report |
+| `tefde-gcp-fastoss-prod-gke` | Prod compute project — Cloud Composer GCS bucket(s) read by the env_drift report |
 
 > **Note:** None of these bindings are applied by `terraform apply` — every
 > corresponding `google_*_iam_member` resource in the Terraform files is
@@ -384,6 +385,44 @@ gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
 
 ---
 
+### Project: `tefde-gcp-fastoss-prod-gke`
+
+---
+
+#### Grant 12 — GCS bucket: read Cloud Composer DAGs for env_drift comparison
+
+**Why:** The env_drift report's `stage_gcs_snapshot()` step downloads the deployed
+DAGs/dbt folder from each product's Cloud Composer bucket (`gcloud storage cp
+--recursive`) to compare against the source repo. The bucket name comes from each
+repo's `.gitlab-ci.yml` (`GCP_BUCKET`); `fastoss-prod-composer-3` is the bucket
+currently in use. It's read-only — `objectViewer` is sufficient, `objectCreator`/
+`objectAdmin` would be over-privileged. If other repos in the subgroup reference a
+*different* Composer bucket, request the same grant for that bucket too (or ask the
+TEF IAM Team about granting `roles/storage.objectViewer` at the project level
+instead, if there are many).
+
+**Resource:** Bucket `fastoss-prod-composer-3` in project `tefde-gcp-fastoss-prod-gke`
+**Role:** `roles/storage.objectViewer`
+
+**gcloud CLI:**
+```bash
+gcloud storage buckets add-iam-policy-binding gs://fastoss-prod-composer-3 \
+  --project=tefde-gcp-fastoss-prod-gke \
+  --role=roles/storage.objectViewer \
+  --member="serviceAccount:devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com"
+```
+
+**GCP Console:**
+1. Navigate to **Cloud Storage → Buckets** (project `tefde-gcp-fastoss-prod-gke`)
+2. Click on `fastoss-prod-composer-3`
+3. Select the **Permissions** tab
+4. Click **Grant Access**
+5. New principals: `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+6. Role: `Storage Object Viewer`
+7. Click **Save**
+
+---
+
 ## Complete Grants Summary
 
 | # | Project | Resource | Role | Principal |
@@ -399,6 +438,7 @@ gcloud projects add-iam-policy-binding tefde-gcp-fastoss-prod \
 | 9 | `tefde-gcp-fastoss-prod` | Project | `roles/bigquery.jobUser` | `devops-reports-runner` SA |
 | 10 | `tefde-gcp-fastoss-dev-gke` | SA `devops-reports-runner` (resource) | `roles/iam.serviceAccountUser` | Terraform deployer identity |
 | 11 | `tefde-gcp-fastoss-dev-gke` | SA `devops-reports-runner` (resource) | `roles/iam.serviceAccountTokenCreator` | Cloud Scheduler service agent |
+| 12 | `tefde-gcp-fastoss-prod-gke` | Bucket `fastoss-prod-composer-3` | `roles/storage.objectViewer` | `devops-reports-runner` SA |
 
 ---
 
@@ -443,7 +483,6 @@ gcloud projects get-iam-policy tefde-gcp-fastoss-dev \
 # Grants 8 & 9 — prod project
 gcloud projects get-iam-policy tefde-gcp-fastoss-prod \
   --format="table(bindings.role,bindings.members)" | grep "$SA"
-```
 
 # Grant 10 — serviceAccountUser on the SA itself
 gcloud iam service-accounts get-iam-policy \
@@ -456,6 +495,11 @@ gcloud iam service-accounts get-iam-policy \
   devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
   --project=tefde-gcp-fastoss-dev-gke \
   --format="table(bindings.role,bindings.members)" | grep "$SCHEDULER_AGENT"
+
+# Grant 12 — GCS bucket in the prod compute project
+gcloud storage buckets get-iam-policy \
+  gs://fastoss-prod-composer-3 \
+  --format="table(bindings.role,bindings.members)" | grep "$SA"
 ```
 
 Each command should return at least one line containing the relevant

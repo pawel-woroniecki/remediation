@@ -10,7 +10,7 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 |---|---|
 | `BQ variables.tf` | All input variables |
 | `BQ DS + Tables.tf` | Secret Manager, GCS bucket, BigQuery dataset + 8 tables — all pinned to `var.region` (europe-west3); IAM bindings commented out — managed by TEF IAM Team |
-| `Cloud Run Jobs.tf` | 4 Cloud Run Job resources (one per report type) |
+| `Cloud Run Jobs.tf` | 4 Cloud Run Job resources (one per report type); env_drift uses 4Gi/2 CPU vs 2Gi/1 CPU for the other 3 due to parallel repo processing |
 | `scheduler.tf` | Daily Cloud Scheduler triggers for the 4 report jobs; IAM binding commented out — managed by TEF IAM Team |
 | `ui_service.tf` | UI Cloud Run Service + invoker IAM; run.developer binding commented out — managed by TEF IAM Team |
 | `artifact_registry.tf` | Artifact Registry Docker repository; IAM bindings commented out — managed by TEF IAM Team |
@@ -33,6 +33,7 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 | Cloud Run Jobs + UI Service | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | Service account *(external, TEF IAM Team)* | — | `tefde-gcp-fastoss-dev-gke` |
 | BigQuery dataset + tables | `reporting_project_id` | `tefde-gcp-fastoss-dev` |
+| Composer bucket read by env_drift *(external, not Terraform-managed)* | — | `tefde-gcp-fastoss-prod-gke` |
 | Shared VPC + connector *(external, TEF Networking Team)* | — | `tefde-gcp-network-shared-ic-1` |
 
 ---
