@@ -165,6 +165,72 @@ Looker Studio version) is selected.
 
 ---
 
+## Additional chart: total discrepancies per repository for a selected time period
+
+This chart lets a viewer pick a date range and immediately see how many drift findings
+each repository produced — useful as a standalone scorecard tile or as an addition to
+the Env Drift page (Step 4).
+
+### Data source
+
+**Resource → Manage added data sources → Add a data source → BigQuery → Custom Query**,
+project `tefde-gcp-fastoss-dev`, paste the following query. Name it
+`Env Drift Findings Over Time`.
+
+```sql
+SELECT
+  DATE(e.execution_ts)  AS report_date,
+  f.product             AS repo,
+  f.component_type,
+  f.drift_category,
+  COUNT(*)              AS total_findings
+FROM `tefde-gcp-fastoss-dev.devops_reports.env_drift_findings` f
+JOIN `tefde-gcp-fastoss-dev.devops_reports.executions` e
+  USING (execution_id)
+WHERE e.status      = 'success'
+  AND e.report_type = 'env_drift'
+GROUP BY 1, 2, 3, 4
+ORDER BY 1 DESC, 5 DESC
+```
+
+### Date range control
+
+**Insert → Date range control**, bind it to `Env Drift Findings Over Time`, default to
+**Last 30 days**. Every chart on the page that uses this data source will respond to it
+automatically.
+
+### Chart options
+
+Choose the view that suits your audience:
+
+**Option A — Bar chart: total findings per repo**
+- Insert → Bar chart
+- Dimension: `repo`
+- Metric: `total_findings` (SUM), sorted descending
+- → Shows which repos have the most drift in the chosen period
+
+**Option B — Time series: trend over time**
+- Insert → Time series
+- Dimension: `report_date`
+- Breakdown dimension: `repo` (optional — one line per repo)
+- Metric: `total_findings` (SUM)
+- → Shows whether drift is increasing or decreasing across the selected period
+
+**Option C — Stacked bar: findings per repo broken down by drift category**
+- Insert → Bar chart (stacked)
+- Dimension: `repo`
+- Breakdown dimension: `drift_category`
+- Metric: `total_findings` (SUM)
+- → Shows not just how many but *what type* of drift each repo has
+
+**Option D — Grand total scorecard**
+- Insert → Scorecard
+- Same data source, Metric: `total_findings` (SUM), no dimension
+- → Responds to the date range control and shows one number: total findings across
+  all repos in the selected period
+
+---
+
 ## Notes
 
 - All Custom Query data sources re-run their SQL against BigQuery on every page load/filter
