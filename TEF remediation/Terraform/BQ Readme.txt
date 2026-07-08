@@ -31,7 +31,7 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 | GCS bucket | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | Artifact Registry | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | Cloud Run Jobs + UI Service | `project_id` | `tefde-gcp-fastoss-dev-gke` |
-| Service account *(external, TEF IAM Team)* | — | `tefde-gcp-fastoss-dev-gke` |
+| Service account *(external, TEF IAM Team)* | — | `tefde-gcp-resvadm-prod-backend` |
 | BigQuery dataset + tables | `reporting_project_id` | `tefde-gcp-fastoss-dev` |
 | Composer bucket read by env_drift *(external, not Terraform-managed)* | — | `tefde-gcp-fastoss-prod-gke` |
 | Shared VPC + connector *(external, TEF Networking Team)* | — | `tefde-gcp-network-shared-ic-1` |
@@ -102,7 +102,7 @@ docker push \
 
 ## Service Account
 
-The single service account `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com`
+The single service account `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
 is **created and managed by the TEF IAM Team**. It is not provisioned by this Terraform workspace.
 
 All `google_*_iam_member` resources referencing this SA are commented out in the Terraform files.

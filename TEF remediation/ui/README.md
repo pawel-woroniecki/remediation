@@ -205,7 +205,7 @@ Open the printed URL in a browser. Access is restricted in two layers:
 
 ## IAM — Service Account
 
-The UI runs as `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com` — the same service account used by the Cloud Run Jobs.
+The UI runs as `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com` — the same service account used by the Cloud Run Jobs.
 
 > **The service account is created and owned by the TEF IAM Team.** All IAM binding resources in Terraform are commented out for reference only. The TEF IAM Team applies the actual grants. See `IAM_admin_instructions.md` for the full list.
 

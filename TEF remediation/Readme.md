@@ -63,7 +63,8 @@ being triggerable manually via the UI or `gcloud run jobs execute`. Schedule tim
 
 | Resource | Project |
 |---|---|
-| Cloud Run Jobs, UI Service, GCS, Secret Manager, Artifact Registry, Service Account *(external, TEF IAM Team)* | `tefde-gcp-fastoss-dev-gke` |
+| Cloud Run Jobs, UI Service, GCS, Secret Manager, Artifact Registry | `tefde-gcp-fastoss-dev-gke` |
+| Service Account *(external, TEF IAM Team)* | `tefde-gcp-resvadm-prod-backend` |
 | BigQuery dataset and tables | `tefde-gcp-fastoss-dev` |
 | BigQuery datasets scanned for orphans | `tefde-gcp-fastoss-prod` |
 | Cloud Composer bucket read by env_drift *(external, TEF IAM Team grant)* | `tefde-gcp-fastoss-prod-gke` |
@@ -164,12 +165,12 @@ The PAT requires `read_api` and `read_repository` scopes. Prefer a **Group Acces
 
 ### 4. Create a key for `devops-reports-runner` (used by CI/CD to push images)
 
-> **Note:** The service account `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com` is created and owned by the **TEF IAM Team**. Request the key from that team or ask them to generate it.
+> **Note:** The service account `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com` is created and owned by the **TEF IAM Team**. Request the key from that team or ask them to generate it.
 
 ```bash
 gcloud iam service-accounts keys create runner-key.json \
-  --iam-account=devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com \
-  --project=tefde-gcp-fastoss-dev-gke
+  --iam-account=devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com \
+  --project=tefde-gcp-resvadm-prod-backend
 ```
 
 Add the contents of `runner-key.json` as the `GCP_SA_KEY` **masked** variable in GitLab CI/CD settings, then delete the local file. See `.gitlab-ci.yml` for the Workload Identity Federation upgrade path that eliminates this key.
@@ -250,7 +251,7 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`, located in
 
 ## Service Account
 
-A single service account `devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com` is used for:
+A single service account `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com` is used for:
 - Cloud Run Jobs runtime (Workload Identity — no key required)
 - UI Cloud Run Service runtime (Workload Identity)
 - CI/CD image pushes to Artifact Registry (JSON key stored as `GCP_SA_KEY` in GitLab CI)

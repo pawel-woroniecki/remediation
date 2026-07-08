@@ -135,7 +135,7 @@ resource "google_cloud_scheduler_job" "file_drift" {
 # firing time (not at terraform apply time).
 #
 # NOTE: IAM binding managed by the TEF IAM Team (see IAM_admin_instructions.md, Grant 11).
-# The service account devops-reports-runner@tefde-gcp-fastoss-dev-gke.iam.gserviceaccount.com
+# The service account devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com
 # is owned by that team. This resource is kept here for documentation purposes only.
 # Do not apply if the TEF IAM Team manages permissions directly to avoid conflicts.
 # resource "google_service_account_iam_member" "scheduler_can_impersonate_runner" {
