@@ -453,7 +453,7 @@ def main() -> int:
     execution_id = os.environ.get("EXECUTION_ID")
     if not execution_id:
         raise ValueError("EXECUTION_ID must be set")
-    triggered_by = os.environ.get("TRIGGERED_BY", "ui")
+    triggered_by = os.environ.get("TRIGGERED_BY", "manual")
     start_time = time.monotonic()
     args = parse_args()
     reporting_project = args.reporting_project or args.gcp_project

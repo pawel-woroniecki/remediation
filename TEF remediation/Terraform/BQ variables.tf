@@ -63,18 +63,8 @@ variable "artifact_registry_repo_id" {
   description = "Artifact Registry repository ID for the devops-reports Docker image."
 }
 
-variable "ui_container_image" {
-  type        = string
-  description = "Full URI of the Docker image for the DevOps Reports web UI Cloud Run Service, e.g. europe-west3-docker.pkg.dev/PROJECT/REPO/devops-reports-ui:latest"
-}
-
 variable "bq_scan_project_id" {
   type        = string
   description = "GCP project ID that contains the BigQuery datasets scanned by the orphan_datasets report. Often a production project separate from the reporting project."
 }
 
-variable "ui_invoker_member" {
-  type        = string
-  default     = "allAuthenticatedUsers"
-  description = "IAM member string allowed to invoke the UI Cloud Run Service. Use 'domain:yourcompany.com' to restrict to a Google Workspace domain, or 'group:team@yourcompany.com' for a specific group."
-}

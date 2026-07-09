@@ -76,31 +76,6 @@ build-reports:
     - docker push "$IMAGE:latest"
 
 # ---------------------------------------------------------------------------
-# UI image (Cloud Run Service)
-# ---------------------------------------------------------------------------
-build-ui:
-  stage: build
-  <<: *gcp_auth
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      changes:
-        - ui/Dockerfile
-        - ui/**/*
-  script:
-    - IMAGE="$REGISTRY/$PROJECT_ID/$REPO/devops-reports-ui"
-    - docker build
-        -f ui/Dockerfile
-        --build-arg BUILD_SHA="$CI_COMMIT_SHORT_SHA"
-        -t "$IMAGE:$CI_COMMIT_SHORT_SHA"
-        -t "$IMAGE:latest"
-        ui/
-    # Scan for HIGH/CRITICAL CVEs before pushing — blocks push on findings.
-    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-    - trivy image --exit-code 1 --severity HIGH,CRITICAL --no-progress "$IMAGE:$CI_COMMIT_SHORT_SHA"
-    - docker push "$IMAGE:$CI_COMMIT_SHORT_SHA"
-    - docker push "$IMAGE:latest"
-
-# ---------------------------------------------------------------------------
 # Terraform plan (informational — no apply in CI)
 # ---------------------------------------------------------------------------
 terraform-plan:

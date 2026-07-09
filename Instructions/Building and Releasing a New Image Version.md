@@ -1,19 +1,15 @@
-# Building and Releasing a New Report/UI Image — Step-by-Step Guide
+# Building and Releasing a New Report Image — Step-by-Step Guide
 
 This document explains how to ship a code change: build a new Docker image, push it to
 Artifact Registry, and — the step people most often forget — **explicitly redeploy** Cloud Run
 so it actually starts using the new image.
 
-There are two separate images in this project:
+There is one image in this project: `devops-reports`, built from `Dockerfile.python`
+(report scripts and `entrypoint.sh`), used by all 4 Cloud Run Jobs.
 
-| Image | Built from | Used by |
-|---|---|---|
-| `devops-reports` | `Dockerfile.python` (report scripts, `entrypoint.sh`) | All 4 Cloud Run Jobs |
-| `devops-reports-ui` | `ui/Dockerfile` (FastAPI backend, frontend) | The `devops-reports-ui` Cloud Run Service |
-
-Change a report script (`git_branches_gap/`, `git_gcp_code_vs_environment_drift/`,
+Change anything in the report scripts (`git_branches_gap/`, `git_gcp_code_vs_environment_drift/`,
 `bigquery_orphan_datasets/`, `clone_all_groups_repo/`, `entrypoint.sh`, `Dockerfile.python`) →
-rebuild `devops-reports`. Change anything under `ui/` → rebuild `devops-reports-ui`.
+rebuild `devops-reports`.
 
 ---
 
@@ -21,7 +17,7 @@ rebuild `devops-reports`. Change anything under `ui/` → rebuild `devops-report
 
 **Pushing a new image does not redeploy it.** Cloud Run resolves an image tag (like `:latest`)
 to a specific digest *at the moment you create or update the Cloud Run resource* — not on every
-execution. If you push a new `:latest` image but never update the Cloud Run Job/Service itself,
+execution. If you push a new `:latest` image but never update the Cloud Run Job itself,
 every future execution keeps using the **old** digest indefinitely, even though Artifact
 Registry now has a newer image under the same tag.
 
@@ -44,8 +40,8 @@ git push origin main
 
 ### Option A — let CI do it (recommended)
 
-`.gitlab-ci.yml`'s `build-reports` / `build-ui` jobs trigger automatically on pushes to the
-default branch that touch the relevant files, and push both a `:<short-sha>` tag and `:latest`.
+`.gitlab-ci.yml`'s `build-reports` job triggers automatically on pushes to the default branch
+that touch the relevant files, and pushes both a `:<short-sha>` tag and `:latest`.
 Check the pipeline succeeded (including the Trivy scan, which blocks the push on HIGH/CRITICAL
 CVEs) before moving on.
 
@@ -57,15 +53,8 @@ CVEs) before moving on.
 
 ```bash
 SHA=$(git rev-parse --short HEAD)
-
-# Reports image
 IMAGE=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports
 docker build -f Dockerfile.python --build-arg BUILD_SHA=$SHA -t $IMAGE:$SHA -t $IMAGE:latest .
-docker push $IMAGE:$SHA && docker push $IMAGE:latest
-
-# UI image
-IMAGE=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui
-docker build -f ui/Dockerfile --build-arg BUILD_SHA=$SHA -t $IMAGE:$SHA -t $IMAGE:latest ui/
 docker push $IMAGE:$SHA && docker push $IMAGE:latest
 ```
 
@@ -88,20 +77,18 @@ faster for a one-off test but causes drift that Method A will silently overwrite
    Terraform only compares the literal text of the `image` attribute, not the underlying
    digest):
    ```hcl
-   container_image    = "europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:abc1234"
-   ui_container_image  = "europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui:abc1234"
+   container_image = "europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:abc1234"
    ```
-   (Only change the one(s) you actually rebuilt.)
 2. Apply:
    ```bash
    cd "TEF remediation/Terraform"
-   terraform plan    # confirm only the relevant Cloud Run Job(s)/Service show as "to change"
+   terraform plan    # confirm only the relevant Cloud Run Job(s) show as "to change"
    terraform apply
    ```
 
 ### Method B — quick manual redeploy with gcloud (no Terraform state change)
 
-For the 4 report jobs, repeat for each job you need to update:
+Repeat for each job you need to update:
 ```bash
 gcloud run jobs update devops-reports-commit-drift \
   --image=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:abc1234 \
@@ -110,14 +97,6 @@ gcloud run jobs update devops-reports-commit-drift \
 ```
 Job names: `devops-reports-orphan-datasets`, `devops-reports-env-drift`,
 `devops-reports-commit-drift`, `devops-reports-file-drift`.
-
-For the UI:
-```bash
-gcloud run services update devops-reports-ui \
-  --image=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui:abc1234 \
-  --project=tefde-gcp-fastoss-dev-gke \
-  --region=europe-west3
-```
 
 If you use Method B, remember to also do Method A's Step 1 edit afterward (without re-applying
 immediately) so `terraform.tfvars` reflects reality — otherwise the *next* unrelated
@@ -134,8 +113,7 @@ reading `terraform.tfvars` will be looking at a stale version number.
      --project=tefde-gcp-fastoss-dev-gke --region=europe-west3 \
      --format="value(template.template.containers[0].image)"
    ```
-   (Use `gcloud run services describe devops-reports-ui ...` for the UI.) The output should
-   show your new SHA tag or its resolved digest, not the old one.
+   The output should show your new SHA tag or its resolved digest, not the old one.
 2. Trigger a run and watch the logs:
    ```bash
    gcloud run jobs execute devops-reports-commit-drift \
@@ -144,7 +122,7 @@ reading `terraform.tfvars` will be looking at a stale version number.
    Check Cloud Logging for the execution and confirm the behavior you changed is actually
    different (e.g. the bug you fixed no longer reproduces).
 3. Each image embeds its build SHA as an OCI label (`org.opencontainers.image.revision`,
-   set via `BUILD_SHA` in the Dockerfiles) if you ever need to confirm exactly which commit a
+   set via `BUILD_SHA` in `Dockerfile.python`) if you ever need to confirm exactly which commit a
    running container was built from:
    ```bash
    gcloud artifacts docker images describe \
@@ -165,8 +143,9 @@ image; only `:latest` ever moves). You don't need to rebuild anything to roll ba
 ## Releasing a full version (optional)
 
 If this change is significant enough to warrant a version tag (see `Readme.md`'s CI/CD section
-for the convention used so far, e.g. `v2.0.0`):
+for the convention used so far, e.g. `v3.0.0`):
 ```bash
-git tag -a v2.1.0 -m "Release v2.1.0: <summary>"
-git push origin v2.1.0
+git tag -a v3.1.0 -m "Release v3.1.0: <summary>"
+git push github v3.1.0
 ```
+GitLab CI creates the release object automatically from the annotated tag message.

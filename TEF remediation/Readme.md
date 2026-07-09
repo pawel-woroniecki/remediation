@@ -6,9 +6,8 @@ A cloud-native reporting framework that detects drift and governance gaps across
 
 ## Reports
 
-All 4 reports run automatically every day via Cloud Scheduler (`scheduler.tf`), in addition to
-being triggerable manually via the UI or `gcloud run jobs execute`. Schedule times are
-`Europe/Berlin`.
+All 4 reports run automatically every day via Cloud Scheduler (`scheduler.tf`). They can be
+triggered manually via `gcloud run jobs execute`. Schedule times are `Europe/Berlin`.
 
 | # | Report | Script | Cloud Run job name | Daily schedule |
 |---|---|---|---|---|
@@ -23,7 +22,7 @@ being triggerable manually via the UI or `gcloud run jobs execute`. Schedule tim
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  UI (devops-reports-ui) / Cloud Scheduler               │
+│  Cloud Scheduler                                        │
 └────────────────────┬────────────────────────────────────┘
                      │  trigger Cloud Run Job
                      ▼
@@ -63,7 +62,7 @@ being triggerable manually via the UI or `gcloud run jobs execute`. Schedule tim
 
 | Resource | Project |
 |---|---|
-| Cloud Run Jobs, UI Service, GCS, Secret Manager, Artifact Registry | `tefde-gcp-fastoss-dev-gke` |
+| Cloud Run Jobs, GCS, Secret Manager, Artifact Registry | `tefde-gcp-fastoss-dev-gke` |
 | Service Account *(external, TEF IAM Team)* | `tefde-gcp-resvadm-prod-backend` |
 | BigQuery dataset and tables | `tefde-gcp-fastoss-dev` |
 | BigQuery datasets scanned for orphans | `tefde-gcp-fastoss-prod` |
@@ -103,13 +102,6 @@ TEF remediation/
 │   ├── env_drift_report.sql
 │   └── orphan_datasets_report.sql
 │
-├── ui/
-│   ├── main.py                              # FastAPI backend
-│   ├── reports.yaml                         # Declarative report + parameter metadata
-│   ├── static/index.html                    # Single-page frontend
-│   ├── requirements.txt                     # UI Python dependencies
-│   └── Dockerfile                           # UI container image
-│
 ├── IAM_admin_instructions.md               # Manual IAM grant instructions for GCP admins
 │
 └── Terraform/
@@ -117,7 +109,6 @@ TEF remediation/
     ├── BQ DS + Tables.tf     # Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true); IAM bindings commented out — managed by TEF IAM Team
     ├── Cloud Run Jobs.tf     # 4 Cloud Run Job resources (VPC egress via connector)
     ├── scheduler.tf          # Daily Cloud Scheduler triggers for the 4 report jobs; IAM binding commented out — managed by TEF IAM Team
-    ├── ui_service.tf         # UI Cloud Run Service (internal + LB ingress only) + IAM (restricted to domain:telefonica.de)
     ├── artifact_registry.tf  # Artifact Registry repo; IAM bindings commented out — managed by TEF IAM Team
     ├── networking.tf         # Data source for the Networking Team's VPC Access Connector (Shared VPC)
     ├── apis.tf               # GCP API enablement (both projects)
@@ -175,21 +166,14 @@ gcloud iam service-accounts keys create runner-key.json \
 
 Add the contents of `runner-key.json` as the `GCP_SA_KEY` **masked** variable in GitLab CI/CD settings, then delete the local file. See `.gitlab-ci.yml` for the Workload Identity Federation upgrade path that eliminates this key.
 
-### 5. Build and push the Docker images
+### 5. Build and push the Docker image
 
 Images are built automatically by the CI pipeline on every commit to the default branch. To build manually:
 
 ```bash
 SHA=$(git rev-parse --short HEAD)
-
-# Reports image
 IMAGE=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports
 docker build -f Dockerfile.python --build-arg BUILD_SHA=$SHA -t $IMAGE:$SHA -t $IMAGE:latest .
-docker push $IMAGE:$SHA && docker push $IMAGE:latest
-
-# UI image
-IMAGE=europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui
-docker build -f ui/Dockerfile --build-arg BUILD_SHA=$SHA -t $IMAGE:$SHA -t $IMAGE:latest ui/
 docker push $IMAGE:$SHA && docker push $IMAGE:latest
 ```
 
@@ -217,7 +201,6 @@ gcloud run jobs execute devops-reports-commit-drift \
 | Stage | Job | Trigger |
 |---|---|---|
 | `build` | `build-reports` | Changes to `Dockerfile.python`, report scripts, or `entrypoint.sh` |
-| `build` | `build-ui` | Changes under `ui/` |
 | `terraform` | `terraform-plan` | Changes under `Terraform/` |
 | `release` | `create-release` | Tag push matching `v*` |
 
@@ -253,7 +236,6 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`, located in
 
 A single service account `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com` is used for:
 - Cloud Run Jobs runtime (Workload Identity — no key required)
-- UI Cloud Run Service runtime (Workload Identity)
 - CI/CD image pushes to Artifact Registry (JSON key stored as `GCP_SA_KEY` in GitLab CI)
 - Identity that Cloud Scheduler runs the 4 report jobs as, once a day
 
@@ -269,9 +251,7 @@ See `IAM_admin_instructions.md` for the full list of IAM grants required.
 
 - No credentials baked into Docker images
 - GitLab PAT stored in **GCP Secret Manager**, fetched at runtime; redacted from git subprocess error output before reaching Cloud Logging
-- Cloud Run Jobs and UI use **Workload Identity** — no long-lived credentials at runtime
-- UI Cloud Run Service ingress restricted to **internal traffic and Cloud Load Balancing** (`INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`), the only value allowed by org policy `constraints/run.allowedIngress` — no direct public URL exists
-- UI access additionally restricted to **`domain:telefonica.de`** Google Workspace accounts via IAM
+- Cloud Run Jobs use **Workload Identity** — no long-lived credentials at runtime
 - Trivy scans for HIGH/CRITICAL CVEs on every image build, blocking push on findings
 - BigQuery tables protected with `deletion_protection = true`
 - All BigQuery, GCS, and Secret Manager resources are pinned to the single region **`europe-west3`**, required by org policy `constraints/gcp.resourceLocations` — multi-region locations such as `EU` are not permitted

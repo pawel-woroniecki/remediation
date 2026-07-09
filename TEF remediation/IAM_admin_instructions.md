@@ -15,7 +15,7 @@ Permissions span four GCP projects:
 
 | GCP Project | Role in the solution |
 |---|---|
-| `tefde-gcp-fastoss-dev-gke` | Compute project — Cloud Run Jobs, UI Service, GCS bucket, Secret Manager, Artifact Registry |
+| `tefde-gcp-fastoss-dev-gke` | Compute project — Cloud Run Jobs, GCS bucket, Secret Manager, Artifact Registry |
 | `tefde-gcp-fastoss-dev` | Reporting project — BigQuery `devops_reports` dataset |
 | `tefde-gcp-fastoss-prod` | Scan project — BigQuery datasets inspected by the orphan datasets report |
 | `tefde-gcp-fastoss-prod-gke` | Prod compute project — Cloud Composer GCS bucket(s) read by the env_drift report |
@@ -168,8 +168,9 @@ gcloud artifacts repositories add-iam-policy-binding devops-reports \
 
 #### Grant 5 — Project IAM: trigger Cloud Run Jobs
 
-**Why:** The web UI backend calls the Cloud Run API to trigger report
-jobs and read their execution status.
+**Why:** Cloud Scheduler invokes the Cloud Run Admin API as this SA to trigger the 4 daily
+report jobs. `run.jobs.run` (included in `roles/run.developer`) is required for each
+scheduled invocation.
 
 **Resource:** Project `tefde-gcp-fastoss-dev-gke`
 **Role:** `roles/run.developer`

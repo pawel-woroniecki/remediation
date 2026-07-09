@@ -85,25 +85,6 @@ Replace the job name with any of the 4 from the table above. This is the most re
 trigger a report manually, since it works from any machine with `gcloud` and the right
 permissions — no network restrictions apply.
 
-### Option B — via the web UI
-
-The UI lets you trigger a report and watch its status from a form, without typing `gcloud`
-commands. See `Instructions/Running the UI.docx` for full UI details.
-
-**Important:** the UI's Cloud Run Service only accepts traffic from inside the corporate
-network/VPN (it is not reachable from the open internet or from Cloud Shell — this is a
-deliberate security restriction, not a bug). If you get a "Not Found" error opening the UI URL,
-make sure you're connected to the corporate network/VPN first.
-
-Steps:
-1. Open the UI URL (ask your team for the current URL, or run:
-   `gcloud run services describe devops-reports-ui --project=tefde-gcp-fastoss-dev-gke --region=europe-west3 --format="value(status.url)"`)
-2. Sign in with your `telefonica.de` Google account if prompted.
-3. Choose a report from the dropdown (label shown matches the table above).
-4. Review the pre-filled parameters (project, bucket, etc. — defaults are usually correct).
-5. Click **Trigger**. The page polls the execution status until it succeeds or fails.
-6. Once succeeded, a link to the GCS output folder is shown.
-
 ---
 
 ## 3. Changing the scheduled time
@@ -193,7 +174,6 @@ account key is required — Looker Studio uses your own Google identity.
 |---|---|---|
 | Job fails immediately with `Secret ... not found or has no versions` | The `gitlab-token` secret has no value loaded yet | `gcloud secrets versions add gitlab-token --project=tefde-gcp-fastoss-dev-gke --data-file=- <<< "YOUR_GITLAB_PAT"` |
 | Scheduled run never seems to fire / fails silently | Grant #11 (`roles/iam.serviceAccountTokenCreator` for the Cloud Scheduler service agent) hasn't been applied yet by the TEF IAM Team | Ask the IAM Team to confirm Grant #11 in `IAM_admin_instructions.md` is in place |
-| UI shows "Error: Not Found" in browser | You're not on the corporate network/VPN — the UI's ingress is internal-only by design | Connect to the corporate network/VPN, then retry |
 | Job fails with a permission/403 error | One of the IAM grants in `IAM_admin_instructions.md` is missing | Ask the TEF IAM Team to verify the relevant grant (currently 12 grants documented) |
 | env_drift `executions` rows show `status = skipped` for some repos | Expected — repos without a `production` branch (e.g. staging/demo projects) are skipped cleanly; not an error | No action needed; monitor `status = failed` rows instead |
 | Need to know which report ran most recently | — | Check the BigQuery query above, or `gcloud run jobs executions list --job=<job-name> --project=tefde-gcp-fastoss-dev-gke --region=europe-west3` |

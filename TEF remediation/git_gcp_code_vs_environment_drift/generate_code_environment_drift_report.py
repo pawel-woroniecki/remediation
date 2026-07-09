@@ -960,7 +960,7 @@ def main() -> int:
     execution_id = os.environ.get("EXECUTION_ID")
     if not execution_id:
         raise ValueError("EXECUTION_ID environment variable must be set")
-    triggered_by = os.environ.get("TRIGGERED_BY", "ui")
+    triggered_by = os.environ.get("TRIGGERED_BY", "manual")
     start_time = time.monotonic()
     args = parse_args()
     # Resolve before try so the except handler can always reference it.

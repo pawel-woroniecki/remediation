@@ -26,7 +26,6 @@ artifact_registry_repo_id = "devops-reports"
 # ---------------------------------------------------------------------------
 # Set these after the images are built and pushed to Artifact Registry.
 container_image    = "europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:latest"
-ui_container_image = "europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui:latest"
 
 # ---------------------------------------------------------------------------
 # Orphan datasets — BigQuery scan project
@@ -34,15 +33,6 @@ ui_container_image = "europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devo
 # The project whose BigQuery datasets are scanned for orphans.
 # This is typically a production data project, separate from the reporting project.
 bq_scan_project_id = "tefde-gcp-fastoss-prod"
-
-# ---------------------------------------------------------------------------
-# UI access control
-# ---------------------------------------------------------------------------
-# Restrict to your Google Workspace domain (recommended):
-#   ui_invoker_member = "domain:yourcompany.com"
-# Or a specific Google Group:
-#   ui_invoker_member = "group:devops-team@yourcompany.com"
-ui_invoker_member = "domain:telefonica.de"
 
 # ---------------------------------------------------------------------------
 # Service account

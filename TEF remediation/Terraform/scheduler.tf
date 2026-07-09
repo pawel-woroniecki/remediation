@@ -9,7 +9,7 @@
 # ---------------------------------------------------------------------------
 
 locals {
-  scheduler_time_zone = "Europe/Berlin" # Telefonica Germany (matches ui_invoker_member = "domain:telefonica.de")
+  scheduler_time_zone = "Europe/Berlin" # Telefonica Germany (Central European Time)
 
   schedule_orphan_datasets = "0 5 * * *"  # 05:00
   schedule_env_drift       = "10 5 * * *" # 05:10

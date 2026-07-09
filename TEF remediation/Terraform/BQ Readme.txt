@@ -12,7 +12,6 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 | `BQ DS + Tables.tf` | Secret Manager, GCS bucket, BigQuery dataset + 8 tables — all pinned to `var.region` (europe-west3); IAM bindings commented out — managed by TEF IAM Team |
 | `Cloud Run Jobs.tf` | 4 Cloud Run Job resources (one per report type); env_drift uses 4Gi/2 CPU vs 2Gi/1 CPU for the other 3 due to parallel repo processing |
 | `scheduler.tf` | Daily Cloud Scheduler triggers for the 4 report jobs; IAM binding commented out — managed by TEF IAM Team |
-| `ui_service.tf` | UI Cloud Run Service + invoker IAM; run.developer binding commented out — managed by TEF IAM Team |
 | `artifact_registry.tf` | Artifact Registry Docker repository; IAM bindings commented out — managed by TEF IAM Team |
 | `networking.tf` | Data source for the Networking Team's VPC Access Connector (Shared VPC) |
 | `apis.tf` | GCP API enablement for both projects |
@@ -30,7 +29,7 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 | Secret Manager | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | GCS bucket | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | Artifact Registry | `project_id` | `tefde-gcp-fastoss-dev-gke` |
-| Cloud Run Jobs + UI Service | `project_id` | `tefde-gcp-fastoss-dev-gke` |
+| Cloud Run Jobs | `project_id` | `tefde-gcp-fastoss-dev-gke` |
 | Service account *(external, TEF IAM Team)* | — | `tefde-gcp-resvadm-prod-backend` |
 | BigQuery dataset + tables | `reporting_project_id` | `tefde-gcp-fastoss-dev` |
 | Composer bucket read by env_drift *(external, not Terraform-managed)* | — | `tefde-gcp-fastoss-prod-gke` |
@@ -50,13 +49,11 @@ Provisions all GCP infrastructure for the devops-reports framework across two pr
 | `gitlab_token_secret_id` | `gitlab-token` | no | Secret Manager secret ID for GitLab PAT |
 | `cloud_run_sa_email` | — | yes | Full email of the SA provided by the TEF IAM Team |
 | `container_image` | — | yes | Full Docker image URI for Cloud Run Jobs |
-| `ui_container_image` | — | yes | Full Docker image URI for the UI Cloud Run Service |
 | `gitlab_base_url` | `https://dot-portal.de.pri.o2.com/gitlab` | no | GitLab instance URL |
 | `gitlab_subgroup` | `ndl_core` | no | Subgroup scanned by reports |
 | `vpc_connector_name` | `fastoss-dev-gke-connector` | no | Name of the VPC Access Connector provisioned by the Networking Team |
 | `artifact_registry_repo_id` | `devops-reports` | no | Artifact Registry repository ID |
 | `bq_scan_project_id` | — | yes | BigQuery project scanned by the orphan datasets report |
-| `ui_invoker_member` | `allAuthenticatedUsers` | no | IAM member allowed to invoke the UI (use `domain:yourcompany.com`) |
 
 ---
 
@@ -91,11 +88,6 @@ docker build -f ../Dockerfile.python \
   -t europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:$SHA ..
 docker push \
   europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports:$SHA
-
-docker build -f ../ui/Dockerfile \
-  -t europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui:$SHA ../ui
-docker push \
-  europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-ui:$SHA
 ```
 
 ---
