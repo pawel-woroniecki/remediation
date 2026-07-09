@@ -77,7 +77,7 @@ gcloud secrets versions add gitlab-token \
   --data-file=- <<< "YOUR_GITLAB_PAT"
 ```
 
-### 2. Build and push the Docker images
+### 2. Build and push the Docker image
 
 Images are built automatically by the GitLab CI pipeline. To build manually:
 

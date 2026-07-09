@@ -73,7 +73,7 @@ gcloud scheduler jobs resume devops-reports-orphan-datasets-trigger \
 
 ## 2. Manual runs
 
-### Option A — via `gcloud` (always available, no UI needed)
+### Via `gcloud`
 
 ```bash
 gcloud run jobs execute devops-reports-commit-drift \

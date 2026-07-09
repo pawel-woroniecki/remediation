@@ -208,8 +208,8 @@ Each build job runs a **Trivy** vulnerability scan between `docker build` and `d
 
 To publish a release:
 ```bash
-git tag -a v1.2.0 -m "Release v1.2.0: <summary>"
-git push origin v1.2.0
+git tag -a v3.1.0 -m "Release v3.1.0: <summary>"
+git push github main && git push github v3.1.0
 ```
 GitLab CI creates the release object automatically from the annotated tag message.
 
