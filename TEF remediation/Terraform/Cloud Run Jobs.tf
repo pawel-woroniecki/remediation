@@ -109,7 +109,7 @@ resource "google_cloud_run_v2_job" "env_drift" {
 
         args = [
           "env_drift",
-          "--gcp-project",        var.project_id,
+          "--gcp-project",        var.bq_scan_project_id,
           "--reporting-project",  var.reporting_project_id,
           "--reports-gcs-bucket", var.reports_gcs_bucket,
         ]
