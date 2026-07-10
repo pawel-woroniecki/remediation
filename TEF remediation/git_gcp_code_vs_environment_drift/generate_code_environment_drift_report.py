@@ -44,6 +44,8 @@ class SourceBqObject:
     sql_fragments: list[str] = field(default_factory=list)
     columns: dict[str, str] = field(default_factory=dict)
     multi_statement: bool = False
+    drop_cols: list[str] = field(default_factory=list)
+    rename_pairs: list[tuple[str, str]] = field(default_factory=list)
 
 
 def default_gcloud_path() -> str:
@@ -278,20 +280,41 @@ def apply_substitutions(snapshot_dir: Path, replacements: dict[str, str]) -> Non
                 file_path.write_text(content, encoding="utf-8")
 
 
-def extract_bq_target(sql: str) -> tuple[str | None, str | None, str]:
+# Matches RENAME TO in ALTER TABLE statements — used to skip "old name" from inventory.
+_RENAME_TO_RE = re.compile(r"\brename\s+to\b", re.IGNORECASE)
+
+# ALTER TABLE pattern reused in build_source_bq_inventory.
+_ALTER_TABLE_RE = re.compile(
+    r"alter\s+table\s+`?(?:(?:[\w\-]+)\.)?(?P<dataset>[\w\-]+)\.(?P<object>[\w\-]+)`?",
+    re.IGNORECASE,
+)
+
+
+def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
+    """Return every CREATE DDL target found in sql as (dataset, object_name, object_type).
+
+    ALTER TABLE is intentionally excluded — it is processed separately in
+    build_source_bq_inventory so that it can update an existing entry's columns
+    without being treated as a standalone object definition.
+    Files with no CREATE DDL (MERGE, INSERT, DROP scripts) return an empty list
+    and are skipped by the caller.
+    """
     patterns = [
-        (r"create\s+(?:or\s+replace\s+)?materialized\s+view\s+`?(?:(?P<project>[\w\-]+)\.)?(?P<dataset>[\w\-]+)\.(?P<object>[\w\-]+)`?", "materialized_view"),
-        (r"create\s+(?:or\s+replace\s+)?view\s+`?(?:(?P<project>[\w\-]+)\.)?(?P<dataset>[\w\-]+)\.(?P<object>[\w\-]+)`?", "view"),
-        (r"create\s+(?:or\s+replace\s+)?table\s+`?(?:(?P<project>[\w\-]+)\.)?(?P<dataset>[\w\-]+)\.(?P<object>[\w\-]+)`?", "table"),
-        (r"create\s+(?:or\s+replace\s+)?procedure\s+`?(?:(?P<project>[\w\-]+)\.)?(?P<dataset>[\w\-]+)\.(?P<object>[\w\-]+)`?", "procedure"),
-        (r"create\s+(?:or\s+replace\s+)?function\s+`?(?:(?P<project>[\w\-]+)\.)?(?P<dataset>[\w\-]+)\.(?P<object>[\w\-]+)`?", "function"),
-        (r"alter\s+table\s+`?(?:(?P<project>[\w\-]+)\.)?(?P<dataset>[\w\-]+)\.(?P<object>[\w\-]+)`?", "alter_table"),
+        (r"create\s+(?:or\s+replace\s+)?materialized\s+view\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "materialized_view"),
+        (r"create\s+(?:or\s+replace\s+)?view\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "view"),
+        (r"create\s+(?:or\s+replace\s+)?table\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "table"),
+        (r"create\s+(?:or\s+replace\s+)?procedure\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "procedure"),
+        (r"create\s+(?:or\s+replace\s+)?function\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "function"),
     ]
-    for pattern, object_type in patterns:
-        match = re.search(pattern, sql, flags=re.IGNORECASE)
-        if match:
-            return match.group("dataset"), match.group("object"), object_type
-    return None, None, "unknown"
+    seen: set[tuple[str | None, str]] = set()
+    results: list[tuple[str | None, str, str]] = []
+    for pattern, otype in patterns:
+        for m in re.finditer(pattern, sql, re.IGNORECASE):
+            ds, obj = m.group("ds"), m.group("obj")
+            if (ds, obj) not in seen:
+                seen.add((ds, obj))
+                results.append((ds, obj, otype))
+    return results
 
 
 def extract_columns_from_create_table(sql: str) -> dict[str, str]:
@@ -314,15 +337,31 @@ def extract_columns_from_create_table(sql: str) -> dict[str, str]:
     return columns
 
 
-def extract_columns_from_alter(sql: str) -> dict[str, str]:
-    columns: dict[str, str] = {}
-    for match in re.finditer(
+def extract_alter_operations(sql: str) -> tuple[dict[str, str], list[str], list[tuple[str, str]]]:
+    """Parse ALTER TABLE DDL and return (add_columns, drop_columns, rename_pairs)."""
+    add_cols: dict[str, str] = {}
+    drop_cols: list[str] = []
+    rename_pairs: list[tuple[str, str]] = []
+
+    for m in re.finditer(
         r"add\s+column(?:\s+if\s+not\s+exists)?\s+`?(?P<name>[\w\-]+)`?\s+(?P<dtype>[A-Z0-9_<>,]+)",
-        sql,
-        flags=re.IGNORECASE,
+        sql, re.IGNORECASE,
     ):
-        columns[match.group("name")] = match.group("dtype").upper()
-    return columns
+        add_cols[m.group("name")] = m.group("dtype").upper()
+
+    for m in re.finditer(
+        r"drop\s+column(?:\s+if\s+exists)?\s+`?(?P<name>[\w\-]+)`?",
+        sql, re.IGNORECASE,
+    ):
+        drop_cols.append(m.group("name"))
+
+    for m in re.finditer(
+        r"rename\s+column\s+`?(?P<old>[\w\-]+)`?\s+to\s+`?(?P<new>[\w\-]+)`?",
+        sql, re.IGNORECASE,
+    ):
+        rename_pairs.append((m.group("old"), m.group("new")))
+
+    return add_cols, drop_cols, rename_pairs
 
 
 def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
@@ -334,25 +373,64 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
 
     for sql_file in sorted(bq_root.rglob("*.sql")):
         sql = sql_file.read_text(encoding="utf-8", errors="replace")
-        dataset, object_name, object_type = extract_bq_target(sql)
-        if not object_name:
-            object_name = sql_file.stem
-        entry = inventory.setdefault(
-            object_name,
-            SourceBqObject(object_name=object_name, dataset=dataset, object_type=object_type),
-        )
-        entry.files.append(str(sql_file.relative_to(snapshot_dir)).replace("\\", "/"))
-        entry.sql_fragments.append(sql)
-        entry.multi_statement = len(entry.files) > 1
-        if object_type in {"table", "alter_table"}:
-            entry.columns.update(extract_columns_from_create_table(sql))
-            entry.columns.update(extract_columns_from_alter(sql))
-            if entry.object_type == "alter_table" and entry.columns:
+        rel_path = str(sql_file.relative_to(snapshot_dir)).replace("\\", "/")
+
+        targets = extract_all_bq_targets(sql)
+        alter_match = _ALTER_TABLE_RE.search(sql)
+
+        # Skip pure DML / MERGE / script files — no DDL of any kind.
+        if not targets and not alter_match:
+            continue
+
+        # Register every CREATE DDL object found in this file (handles multi-table files).
+        for dataset, object_name, object_type in targets:
+            entry = inventory.setdefault(
+                object_name,
+                SourceBqObject(object_name=object_name, dataset=dataset, object_type=object_type),
+            )
+            if rel_path not in entry.files:
+                entry.files.append(rel_path)
+            entry.sql_fragments.append(sql)
+            entry.multi_statement = len(entry.files) > 1
+            if object_type == "table":
+                entry.columns.update(extract_columns_from_create_table(sql))
+            if dataset and not entry.dataset:
+                entry.dataset = dataset
+            if entry.object_type == "unknown":
+                entry.object_type = object_type
+
+        # Process ALTER TABLE if present.
+        if alter_match:
+            # RENAME TO means the old name no longer exists in GCP — don't register it.
+            if _RENAME_TO_RE.search(sql):
+                continue
+            ds = alter_match.group("dataset")
+            obj = alter_match.group("object")
+            entry = inventory.setdefault(
+                obj,
+                SourceBqObject(object_name=obj, dataset=ds, object_type="table"),
+            )
+            if rel_path not in entry.files:
+                entry.files.append(rel_path)
+            entry.sql_fragments.append(sql)
+            entry.multi_statement = len(entry.files) > 1
+            add_cols, drop_cols, rename_pairs = extract_alter_operations(sql)
+            entry.columns.update(add_cols)
+            entry.drop_cols.extend(drop_cols)
+            entry.rename_pairs.extend(rename_pairs)
+            if ds and not entry.dataset:
+                entry.dataset = ds
+            if entry.object_type in ("unknown", "alter_table"):
                 entry.object_type = "table"
-        elif object_type != "unknown":
-            entry.object_type = object_type
-        if dataset and not entry.dataset:
-            entry.dataset = dataset
+
+    # Apply DROP COLUMN and RENAME COLUMN transformations accumulated from ALTER files.
+    for entry in inventory.values():
+        for col in entry.drop_cols:
+            entry.columns.pop(col, None)
+        for old, new in entry.rename_pairs:
+            if old in entry.columns:
+                entry.columns[new] = entry.columns.pop(old)
+
     return inventory
 
 
