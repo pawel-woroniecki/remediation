@@ -926,8 +926,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--allow-empty-datasets",
         action="store_true",
-        help="Allow execution to continue when no datasets are resolved. "
-             "BigQuery comparison will be skipped."
+        help="No-op, kept for backward compatibility. "
+             "No-dataset repos always skip BQ comparison."
     )
     parser.add_argument(
         "--gcs-prefix",
@@ -1000,17 +1000,10 @@ def main() -> int:
         if dataset_names and not resolved_datasets:
             resolved_datasets = [item.strip() for item in dataset_names.split(",") if item.strip()]
         if not resolved_datasets:
-            if args.allow_empty_datasets:
-                print(
-                    "WARNING: No datasets resolved. "
-                    "BigQuery comparison will be skipped."
-                )
-            else:
-                raise ValueError(
-                    "No datasets resolved. Pass --datasets explicitly or ensure "
-                    "BQ_DATASET_NAMES is present in .gitlab-ci.yml, "
-                    "or use --allow-empty-datasets."
-                )
+            print(
+                "WARNING: No datasets resolved. "
+                "BigQuery comparison will be skipped."
+            )
 
         apply_substitutions(
             snapshot_dir,
