@@ -98,7 +98,7 @@ LEFT JOIN objects_agg oa
   AND oa.dataset_name = d.dataset_name
 ORDER BY
   d.risk_score DESC,
-  d.total_storage_mb DESC,
+  total_storage_mb DESC,
   d.dataset_name;
 
 

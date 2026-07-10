@@ -4,17 +4,81 @@ This document walks through building a 4-page Looker Studio report on top of the
 `devops_reports` BigQuery dataset: an Overview/Health page plus one page per report type. It
 uses the queries already written in `looker_sql/` and the `execution_daily_summary` view.
 
-No service account or key is needed — Looker Studio connects using your own Google identity.
+The dashboard uses Service Account Credentials so it remains accessible after any individual
+leaves the organisation. Complete the one-time GCP setup in Step 0 before building the report.
 
 ---
 
 ## Prerequisites
 
-- A `telefonica.de` Google account with BigQuery read access to `tefde-gcp-fastoss-dev`
-  (`devops_reports` dataset).
+- A `telefonica.de` Google account with permission to edit Looker Studio reports and to run
+  `gcloud` commands against `tefde-gcp-resvadm-prod-backend`.
 - The files in `looker_sql/`: `commit_drift_report.sql`, `file_drift_report.sql`,
   `env_drift_report.sql`, `orphan_datasets_report.sql`. Each already has the GCP project ID
   filled in (`tefde-gcp-fastoss-dev`).
+
+---
+
+## Step 0 — One-time GCP setup for Service Account Credentials
+
+This step is performed once per Looker Studio report. It grants Looker Studio's service agent
+the right to impersonate `devops-reports-runner` so the dashboard works for all viewers
+regardless of their personal GCP access.
+
+### 0.1 — Enable the Looker Studio API
+
+In the GCP Console, enable the Looker Studio API in the reporting project:
+
+```
+https://console.cloud.google.com/apis/library/datastudio.googleapis.com?project=tefde-gcp-fastoss-dev
+```
+
+Click **Enable** (takes a few seconds).
+
+### 0.2 — Get the project number
+
+```bash
+gcloud projects describe tefde-gcp-fastoss-dev --format="value(projectNumber)"
+```
+
+Note the number — call it `PROJECT_NUMBER` in the commands below.
+
+### 0.3 — Grant Token Creator on the runner service account
+
+```bash
+gcloud iam service-accounts add-iam-policy-binding \
+  devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com \
+  --member="serviceAccount:service-PROJECT_NUMBER@gcp-sa-datastudio.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountTokenCreator" \
+  --project=tefde-gcp-resvadm-prod-backend
+```
+
+This allows Looker Studio's own service agent to generate tokens as `devops-reports-runner`,
+which has BigQuery read access to `tefde-gcp-fastoss-dev.devops_reports`.
+
+### 0.4 — Link the Looker Studio report to the GCP project
+
+After creating the report in Step 1:
+
+1. In the report editor → **File → Report settings**.
+2. Scroll to **Google Cloud project** and enter `tefde-gcp-fastoss-dev`.
+3. Click **Save**.
+
+This step makes Looker Studio use the service agent from the project above (whose Token
+Creator permission you just granted).
+
+### 0.5 — Set Service Account Credentials on each data source
+
+Whenever you add a new data source (Steps 1–5 below):
+
+1. Open **Resource → Manage added data sources** → click the pencil icon on the source.
+2. Click **Edit connection** → **Update data credentials**.
+3. Select **Service Account Credentials**.
+4. Enter `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`.
+5. Click **Update**.
+
+The error "missing iam.serviceAccount.getAccessToken" will not appear if Step 0.3 was
+completed first.
 
 ---
 
@@ -157,10 +221,12 @@ Looker Studio version) is selected.
 
 ## Step 7 — Share the dashboard
 
-1. Click **Share** in the top right.
-2. Add the `telefonica.de` Google Group or specific users who should view it — access is
-   controlled entirely within Looker Studio, not GCP IAM.
-3. Optional: click **File → Schedule email delivery** to send a periodic snapshot (e.g. weekly)
+1. Verify all data sources use **Service Account Credentials** (Step 0.5) — viewers do not
+   need their own GCP access once this is configured.
+2. Click **Share** in the top right.
+3. Add the `telefonica.de` Google Group or specific users who should view it. Looker Studio
+   controls who can open the report; data access goes through the service account.
+4. Optional: click **File → Schedule email delivery** to send a periodic snapshot (e.g. weekly)
    to stakeholders who don't need to log in directly.
 
 ---
