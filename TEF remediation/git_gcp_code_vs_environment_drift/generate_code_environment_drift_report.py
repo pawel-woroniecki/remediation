@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+from google.api_core.exceptions import NotFound
 from google.cloud import bigquery, storage
 
 import argparse
@@ -456,17 +457,23 @@ def fetch_bigquery_inventory(
     datasets: list[str],
 ) -> dict[str, dict[str, Any]]:
     """Fetch BigQuery metadata for the selected target project via INFORMATION_SCHEMA views."""
-    bq = bigquery.Client(project=project_id)
+    # location must match where the datasets live; omitting it defaults to US and
+    # causes "not found in location US" for EU datasets.
+    bq = bigquery.Client(project=project_id, location="europe-west3")
     inventory: dict[str, dict[str, Any]] = {}
 
     def _q(sql: str) -> list[dict[str, Any]]:
         return [dict(row) for row in bq.query(sql).result()]
 
     for dataset in datasets:
-        table_rows   = _q(f"SELECT table_name, table_type, ddl FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.TABLES")
-        column_rows  = _q(f"SELECT table_name, column_name, data_type FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.COLUMNS")
-        routine_rows = _q(f"SELECT routine_name, routine_type, routine_definition FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.ROUTINES")
-        view_rows    = _q(f"SELECT table_name, view_definition FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.VIEWS")
+        try:
+            table_rows   = _q(f"SELECT table_name, table_type, ddl FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.TABLES")
+            column_rows  = _q(f"SELECT table_name, column_name, data_type FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.COLUMNS")
+            routine_rows = _q(f"SELECT routine_name, routine_type, routine_definition FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.ROUTINES")
+            view_rows    = _q(f"SELECT table_name, view_definition FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.VIEWS")
+        except NotFound:
+            print(f"WARNING: dataset {project_id}:{dataset} not found in BigQuery — treating as absent (drift)")
+            continue
 
         for row in table_rows:
             inventory[row["table_name"]] = {
