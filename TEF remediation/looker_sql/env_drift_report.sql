@@ -22,21 +22,10 @@
 -- ──────────────────────────────────────────────────────────────────────────────
 -- Summary — finding counts grouped by product × component × drift category
 -- ──────────────────────────────────────────────────────────────────────────────
-WITH latest_exec AS (
-  SELECT
-    execution_id,
-    execution_ts,
-    environment,
-    status,
-    triggered_by,
-    git_ref
-  FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
-  WHERE report_type = 'env_drift'
-    AND status      = 'success'
-  QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
-),
-
-findings AS (
+WITH latest_findings AS (
+  -- Each repo runs as a separate subprocess with its own execution_id.
+  -- PARTITION BY f.product keeps the most recent successful execution per repo
+  -- so all repos appear, not just whichever one wrote its executions row last.
   SELECT
     f.execution_id,
     f.product,
@@ -53,35 +42,41 @@ findings AS (
       WHEN 'low'    THEN 3
       WHEN 'none'   THEN 4
       ELSE               5
-    END                  AS severity_sort
+    END                  AS severity_sort,
+    e.execution_ts,
+    e.environment,
+    e.triggered_by,
+    e.git_ref
   FROM `tefde-gcp-fastoss-dev.devops_reports.env_drift_findings` f
-  JOIN latest_exec USING (execution_id)
+  JOIN `tefde-gcp-fastoss-dev.devops_reports.executions` e USING (execution_id)
+  WHERE e.report_type = 'env_drift'
+    AND e.status      = 'success'
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY f.product ORDER BY e.execution_ts DESC) = 1
 ),
 
 summary AS (
   SELECT
-    e.execution_ts,
-    e.environment,
-    e.triggered_by,
-    e.git_ref,
-    f.product,
-    f.component_type,
-    f.drift_category,
-    f.severity,
-    f.severity_sort,
+    execution_ts,
+    environment,
+    triggered_by,
+    git_ref,
+    product,
+    component_type,
+    drift_category,
+    severity,
+    severity_sort,
     COUNT(*)                                       AS total_findings,
-    COUNT(DISTINCT f.object_name)                  AS distinct_objects,
-    COUNTIF(f.source_hash IS NULL OR f.source_hash = '') AS env_only_count,
-    COUNTIF(f.env_hash IS NULL   OR f.env_hash   = '') AS code_only_count,
+    COUNT(DISTINCT object_name)                    AS distinct_objects,
+    COUNTIF(source_hash IS NULL OR source_hash = '') AS env_only_count,
+    COUNTIF(env_hash IS NULL   OR env_hash   = '') AS code_only_count,
     COUNTIF(
-      f.source_hash IS NOT NULL AND f.source_hash != ''
-      AND f.env_hash IS NOT NULL AND f.env_hash != ''
+      source_hash IS NOT NULL AND source_hash != ''
+      AND env_hash IS NOT NULL AND env_hash != ''
     )                                              AS hash_mismatch_count
-  FROM latest_exec e
-  JOIN findings f USING (execution_id)
+  FROM latest_findings
   GROUP BY
-    e.execution_ts, e.environment, e.triggered_by, e.git_ref,
-    f.product, f.component_type, f.drift_category, f.severity, f.severity_sort
+    execution_ts, environment, triggered_by, git_ref,
+    product, component_type, drift_category, severity, severity_sort
 )
 
 SELECT
@@ -141,31 +136,43 @@ ORDER BY
 -- Run independently in SQL Runner or as a separate Looker tile.
 -- ──────────────────────────────────────────────────────────────────────────────
 /*
-WITH latest_exec AS (
-  SELECT execution_id, execution_ts, environment, git_ref
-  FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
-  WHERE report_type = 'env_drift'
-    AND status      = 'success'
-  QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
+WITH latest_findings AS (
+  SELECT
+    f.execution_id,
+    f.product,
+    f.component_type,
+    f.object_type,
+    f.object_name,
+    f.drift_category,
+    f.severity,
+    f.source_hash,
+    f.env_hash,
+    e.execution_ts,
+    e.environment,
+    e.git_ref
+  FROM `tefde-gcp-fastoss-dev.devops_reports.env_drift_findings` f
+  JOIN `tefde-gcp-fastoss-dev.devops_reports.executions` e USING (execution_id)
+  WHERE e.report_type = 'env_drift'
+    AND e.status      = 'success'
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY f.product ORDER BY e.execution_ts DESC) = 1
 )
 
 SELECT
-  e.execution_ts,
-  e.environment,
-  e.git_ref,
-  f.product,
-  f.component_type,
-  f.object_type,
-  f.object_name,
-  f.drift_category,
-  f.severity,
-  f.source_hash,
-  f.env_hash
-FROM `tefde-gcp-fastoss-dev.devops_reports.env_drift_findings` f
-JOIN latest_exec e USING (execution_id)
+  execution_ts,
+  environment,
+  git_ref,
+  product,
+  component_type,
+  object_type,
+  object_name,
+  drift_category,
+  severity,
+  source_hash,
+  env_hash
+FROM latest_findings
 ORDER BY
-  CASE f.severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
-  f.product,
-  f.component_type,
-  f.object_name;
+  CASE severity WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+  product,
+  component_type,
+  object_name;
 */
