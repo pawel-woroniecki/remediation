@@ -46,6 +46,7 @@ class SourceBqObject:
     multi_statement: bool = False
     drop_cols: list[str] = field(default_factory=list)
     rename_pairs: list[tuple[str, str]] = field(default_factory=list)
+    is_ctas: bool = False
 
 
 def default_gcloud_path() -> str:
@@ -116,6 +117,11 @@ def normalize_sql(sql: str) -> str:
     sql = sql.replace("`", "")
     sql = re.sub(r"\s+", " ", sql)
     return sql.strip().lower()
+
+
+def strip_create_as_header(sql: str) -> str:
+    """Remove CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE ... AS header, leaving the body."""
+    return _CREATE_AS_HEADER_RE.sub("", sql, count=1).strip()
 
 
 def strip_redundant_project_qualifiers(sql: str, project_id: str) -> str:
@@ -280,6 +286,19 @@ def apply_substitutions(snapshot_dir: Path, replacements: dict[str, str]) -> Non
                 file_path.write_text(content, encoding="utf-8")
 
 
+# Strips CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE [IF NOT EXISTS] … AS header.
+_CREATE_AS_HEADER_RE = re.compile(
+    r"^\s*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+"
+    r"(?:if\s+not\s+exists\s+)?`?(?:[\w\-]+\.)*[\w\-]+`?\s+as\b",
+    re.IGNORECASE,
+)
+
+# Detects CTAS tables (CREATE TABLE … AS SELECT/WITH) — these have no column definitions.
+_CTAS_RE = re.compile(
+    r"create\s+(?:or\s+replace\s+)?table\s+.*?\bas\s+(?:select|with)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # Matches RENAME TO in ALTER TABLE statements — used to skip "old name" from inventory.
 _RENAME_TO_RE = re.compile(r"\brename\s+to\b", re.IGNORECASE)
 
@@ -394,6 +413,8 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
             entry.multi_statement = len(entry.files) > 1
             if object_type == "table":
                 entry.columns.update(extract_columns_from_create_table(sql))
+                if _CTAS_RE.search(sql):
+                    entry.is_ctas = True
             if dataset and not entry.dataset:
                 entry.dataset = dataset
             if entry.object_type == "unknown":
@@ -788,7 +809,9 @@ def compare_bigquery(
                 }
             )
 
-        if source.columns and actual.get("columns"):
+        # CTAS tables have no explicit column definitions in source DDL — skip schema
+        # comparison and fall through to body comparison below.
+        if source.columns and actual.get("columns") and not source.is_ctas:
             actual_columns = actual["columns"]
             missing_in_prod = sorted(set(source.columns) - set(actual_columns))
             extra_in_prod = sorted(set(actual_columns) - set(source.columns))
@@ -814,7 +837,13 @@ def compare_bigquery(
                 )
 
         if source.object_type in {"view", "materialized_view"}:
-            source_sql = normalize_sql(strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id))
+            # GCP returns the view body only (no CREATE VIEW header) via view_definition.
+            # Strip the header from source so both sides are body-only before comparing.
+            source_sql = normalize_sql(
+                strip_create_as_header(
+                    strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id)
+                )
+            )
             actual_sql = normalize_sql(
                 strip_redundant_project_qualifiers(actual.get("view_query") or actual.get("ddl") or "", project_id)
             )
@@ -830,6 +859,32 @@ def compare_bigquery(
                         "details": (
                             "Source view definition and selected GCP view definition differ after normalization."
                         ),
+                    }
+                )
+
+        if source.object_type == "table" and source.is_ctas:
+            # GCP INFORMATION_SCHEMA.TABLES.ddl includes the full CTAS DDL with header.
+            # Strip the header from both sides so comparison is body-only.
+            source_sql = normalize_sql(
+                strip_create_as_header(
+                    strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id)
+                )
+            )
+            actual_sql = normalize_sql(
+                strip_create_as_header(
+                    strip_redundant_project_qualifiers(actual.get("ddl") or "", project_id)
+                )
+            )
+            if actual_sql and source_sql and source_sql != actual_sql:
+                findings.append(
+                    {
+                        "area": "bigquery",
+                        "object_name": object_name,
+                        "dataset": actual.get("dataset"),
+                        "status": "definition_mismatch",
+                        "severity": "high",
+                        "source_technology": source.source_kind,
+                        "details": "Source CTAS body and GCP CTAS body differ after normalization.",
                     }
                 )
     return findings
