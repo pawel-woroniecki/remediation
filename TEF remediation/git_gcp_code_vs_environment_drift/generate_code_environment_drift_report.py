@@ -71,11 +71,12 @@ def default_nexus_repository(project_name: str) -> str:
     return f"raw-snapshots_hosted/fastoss_b/ndl_core/{project_name}"
 
 
-def run_command(args: list[str], *, cwd: str | None = None, check: bool = True) -> str:
+def run_command(args: list[str], *, cwd: str | None = None, check: bool = True, env: dict | None = None) -> str:
     """Run a subprocess and return stdout, raising a detailed error on failure."""
     proc = subprocess.run(
         args,
         cwd=cwd,
+        env=env,
         text=True,
         capture_output=True,
         encoding="utf-8",
@@ -638,6 +639,11 @@ def stage_gcs_snapshot(
     if target_dir.exists():
         shutil.rmtree(target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
+    # Give each repo its own gcloud config dir so parallel subprocesses don't race
+    # over the shared /workspace/.config/gcloud/ and corrupt the active account state.
+    gcloud_config_dir = target_dir / ".gcloud"
+    gcloud_config_dir.mkdir(parents=True, exist_ok=True)
+    gcloud_env = {**os.environ, "CLOUDSDK_CONFIG": str(gcloud_config_dir)}
     for area in ("dbt", "python"):
         area_target = target_dir / area
         area_target.mkdir(parents=True, exist_ok=True)
@@ -652,7 +658,8 @@ def stage_gcs_snapshot(
                     "--recursive",
                     source_path,
                     str(area_target),
-                ]
+                ],
+                env=gcloud_env,
             )
         except RuntimeError as exc:
             message = str(exc)
