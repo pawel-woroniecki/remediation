@@ -319,11 +319,11 @@ def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
     and are skipped by the caller.
     """
     patterns = [
-        (r"create\s+(?:or\s+replace\s+)?materialized\s+view\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "materialized_view"),
-        (r"create\s+(?:or\s+replace\s+)?view\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "view"),
-        (r"create\s+(?:or\s+replace\s+)?table\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "table"),
-        (r"create\s+(?:or\s+replace\s+)?procedure\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "procedure"),
-        (r"create\s+(?:or\s+replace\s+)?function\s+`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "function"),
+        (r"create\s+(?:or\s+replace\s+)?materialized\s+view\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "materialized_view"),
+        (r"create\s+(?:or\s+replace\s+)?view\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "view"),
+        (r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "table"),
+        (r"create\s+(?:or\s+replace\s+)?procedure\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "procedure"),
+        (r"create\s+(?:or\s+replace\s+)?function\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "function"),
     ]
     seen: set[tuple[str | None, str]] = set()
     results: list[tuple[str | None, str, str]] = []
