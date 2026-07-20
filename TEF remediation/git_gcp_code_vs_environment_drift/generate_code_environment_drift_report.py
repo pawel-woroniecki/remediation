@@ -46,6 +46,7 @@ class SourceBqObject:
     multi_statement: bool = False
     drop_cols: list[str] = field(default_factory=list)
     rename_pairs: list[tuple[str, str]] = field(default_factory=list)
+    type_changes: dict[str, str] = field(default_factory=dict)
     is_ctas: bool = False
 
 
@@ -361,11 +362,14 @@ def extract_columns_from_create_table(sql: str) -> dict[str, str]:
     return columns
 
 
-def extract_alter_operations(sql: str) -> tuple[dict[str, str], list[str], list[tuple[str, str]]]:
-    """Parse ALTER TABLE DDL and return (add_columns, drop_columns, rename_pairs)."""
+def extract_alter_operations(
+    sql: str,
+) -> tuple[dict[str, str], list[str], list[tuple[str, str]], dict[str, str]]:
+    """Parse ALTER TABLE DDL and return (add_columns, drop_columns, rename_pairs, type_changes)."""
     add_cols: dict[str, str] = {}
     drop_cols: list[str] = []
     rename_pairs: list[tuple[str, str]] = []
+    type_changes: dict[str, str] = {}
 
     for m in re.finditer(
         r"add\s+column(?:\s+if\s+not\s+exists)?\s+`?(?P<name>[\w\-]+)`?\s+(?P<dtype>[A-Z0-9_<>,]+)",
@@ -385,7 +389,13 @@ def extract_alter_operations(sql: str) -> tuple[dict[str, str], list[str], list[
     ):
         rename_pairs.append((m.group("old"), m.group("new")))
 
-    return add_cols, drop_cols, rename_pairs
+    for m in re.finditer(
+        r"alter\s+column\s+`?(?P<name>[\w\-]+)`?\s+set\s+data\s+type\s+(?P<dtype>[A-Z0-9_<>,\s]+?)(?:\s+using\b|\s*;|\s*$)",
+        sql, re.IGNORECASE | re.MULTILINE,
+    ):
+        type_changes[m.group("name")] = m.group("dtype").strip().upper()
+
+    return add_cols, drop_cols, rename_pairs, type_changes
 
 
 def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
@@ -440,22 +450,27 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
                 entry.files.append(rel_path)
             entry.sql_fragments.append(sql)
             entry.multi_statement = len(entry.files) > 1
-            add_cols, drop_cols, rename_pairs = extract_alter_operations(sql)
+            add_cols, drop_cols, rename_pairs, type_changes = extract_alter_operations(sql)
             entry.columns.update(add_cols)
             entry.drop_cols.extend(drop_cols)
             entry.rename_pairs.extend(rename_pairs)
+            entry.type_changes.update(type_changes)
             if ds and not entry.dataset:
                 entry.dataset = ds
             if entry.object_type in ("unknown", "alter_table"):
                 entry.object_type = "table"
 
-    # Apply DROP COLUMN and RENAME COLUMN transformations accumulated from ALTER files.
+    # Apply DROP COLUMN, RENAME COLUMN, and SET DATA TYPE transformations from ALTER files.
+    # Order matters: renames first, then type changes (a column may be renamed and then retyped).
     for entry in inventory.values():
         for col in entry.drop_cols:
             entry.columns.pop(col, None)
         for old, new in entry.rename_pairs:
             if old in entry.columns:
                 entry.columns[new] = entry.columns.pop(old)
+        for col, new_type in entry.type_changes.items():
+            if col in entry.columns:
+                entry.columns[col] = new_type
 
     return inventory
 
