@@ -287,11 +287,15 @@ def apply_substitutions(snapshot_dir: Path, replacements: dict[str, str]) -> Non
                 file_path.write_text(content, encoding="utf-8")
 
 
-# Strips CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE [IF NOT EXISTS] … AS header.
+# Strips the full CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE … AS header,
+# including optional column-description blocks (col OPTIONS(description='…')) that
+# BigQuery allows between the object name and the AS keyword.
+# The lookahead (?=select\b|with\b) anchors the match to the AS that actually
+# introduces the body, so it handles IF NOT EXISTS, column descriptions, and
+# bare CREATE VIEW name AS SELECT patterns uniformly.
 _CREATE_AS_HEADER_RE = re.compile(
-    r"^\s*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+"
-    r"(?:if\s+not\s+exists\s+)?`?(?:[\w\-]+\.)*[\w\-]+`?\s+as\b",
-    re.IGNORECASE,
+    r"^\s*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+.*?\bas\s+(?=select\b|with\b)",
+    re.IGNORECASE | re.DOTALL,
 )
 
 # Detects CTAS tables (CREATE TABLE … AS SELECT/WITH) — these have no column definitions.
