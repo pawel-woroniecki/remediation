@@ -417,6 +417,7 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
             continue
 
         # Register every CREATE DDL object found in this file (handles multi-table files).
+        is_replace = bool(re.search(r"\bcreate\s+or\s+replace\b", sql, re.IGNORECASE))
         for dataset, object_name, object_type in targets:
             entry = inventory.setdefault(
                 object_name,
@@ -424,12 +425,21 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
             )
             if rel_path not in entry.files:
                 entry.files.append(rel_path)
-            entry.sql_fragments.append(sql)
+            # A CREATE OR REPLACE in a later versioned file (e.g. _v1.sql) supersedes the
+            # original DDL entirely — replace sql_fragments rather than accumulating, so the
+            # view/table body comparison uses the latest version and not a concatenation.
+            if is_replace and len(entry.files) > 1:
+                entry.sql_fragments = [sql]
+                if object_type == "table":
+                    entry.columns = extract_columns_from_create_table(sql)
+                    entry.is_ctas = bool(_CTAS_RE.search(sql))
+            else:
+                entry.sql_fragments.append(sql)
+                if object_type == "table":
+                    entry.columns.update(extract_columns_from_create_table(sql))
+                    if _CTAS_RE.search(sql):
+                        entry.is_ctas = True
             entry.multi_statement = len(entry.files) > 1
-            if object_type == "table":
-                entry.columns.update(extract_columns_from_create_table(sql))
-                if _CTAS_RE.search(sql):
-                    entry.is_ctas = True
             if dataset and not entry.dataset:
                 entry.dataset = dataset
             if entry.object_type == "unknown":
