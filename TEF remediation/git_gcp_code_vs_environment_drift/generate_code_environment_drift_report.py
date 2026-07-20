@@ -121,9 +121,30 @@ def normalize_sql(sql: str) -> str:
     return sql.strip().lower()
 
 
+def _strip_outer_parens(sql: str) -> str:
+    """Strip one layer of outer parentheses if the entire body is wrapped in ( … ).
+
+    BQ INFORMATION_SCHEMA returns view bodies without the outer parens that some DDL
+    files add: CREATE VIEW … AS (SELECT …). Only strips when the opening paren pairs
+    with the very last character, so inner parens in subqueries are never touched.
+    """
+    if not (sql.startswith("(") and sql.endswith(")")):
+        return sql
+    depth = 0
+    for i, ch in enumerate(sql):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if depth == 0 and i < len(sql) - 1:
+            return sql  # outer paren closes before the end — not a simple wrapper
+    return sql[1:-1].strip()
+
+
 def strip_create_as_header(sql: str) -> str:
     """Remove CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE ... AS header, leaving the body."""
-    return _CREATE_AS_HEADER_RE.sub("", sql, count=1).strip()
+    body = _CREATE_AS_HEADER_RE.sub("", sql, count=1).strip()
+    return _strip_outer_parens(body)
 
 
 def strip_redundant_project_qualifiers(sql: str, project_id: str) -> str:
@@ -289,13 +310,11 @@ def apply_substitutions(snapshot_dir: Path, replacements: dict[str, str]) -> Non
 
 
 # Strips the full CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE … AS header,
-# including optional column-description blocks (col OPTIONS(description='…')) that
-# BigQuery allows between the object name and the AS keyword.
-# The lookahead (?=select\b|with\b) anchors the match to the AS that actually
-# introduces the body, so it handles IF NOT EXISTS, column descriptions, and
-# bare CREATE VIEW name AS SELECT patterns uniformly.
+# including optional column-description blocks, OPTIONS clauses, and IF NOT EXISTS.
+# The lookahead also allows ( to handle bodies wrapped in parentheses:
+#   CREATE VIEW … AS (SELECT …)  — BQ INFORMATION_SCHEMA returns the body without parens.
 _CREATE_AS_HEADER_RE = re.compile(
-    r"^\s*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+.*?\bas\s+(?=select\b|with\b)",
+    r"^\s*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+.*?\bas\s+(?=\(|select\b|with\b)",
     re.IGNORECASE | re.DOTALL,
 )
 
