@@ -535,6 +535,13 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
         if "models" not in sql_file.parts:
             continue
         content = sql_file.read_text(encoding="utf-8", errors="replace")
+        # Skip aggregation/DML scripts: naming convention (aggr/merge in stem) AND
+        # body contains DML keywords confirm this is not a deployable dbt SELECT model.
+        stem_lower = sql_file.stem.lower()
+        if ("aggr" in stem_lower or "merge" in stem_lower) and re.search(
+            r"\b(?:merge|update|drop)\b", content, re.IGNORECASE
+        ):
+            continue
         materialized = extract_materialization(content)
         inventory[sql_file.stem] = {
             "object_name": sql_file.stem,
