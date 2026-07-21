@@ -537,9 +537,12 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
         content = sql_file.read_text(encoding="utf-8", errors="replace")
         # Skip aggregation/DML scripts: naming convention (aggr/merge in stem) AND
         # body contains DML keywords confirm this is not a deployable dbt SELECT model.
+        # Strip Jinja blocks first so that dbt config values like
+        # incremental_strategy='merge' or merge_exclude_columns don't trigger the check.
         stem_lower = sql_file.stem.lower()
+        sql_body = re.sub(r"\{\{.*?\}\}", "", content, flags=re.DOTALL)
         if ("aggr" in stem_lower or "merge" in stem_lower) and re.search(
-            r"\b(?:merge|update|drop)\b", content, re.IGNORECASE
+            r"\b(?:merge|update|drop)\b", sql_body, re.IGNORECASE
         ):
             continue
         materialized = extract_materialization(content)
