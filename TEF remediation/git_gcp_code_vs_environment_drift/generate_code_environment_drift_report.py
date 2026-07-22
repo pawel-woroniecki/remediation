@@ -425,6 +425,11 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
         return inventory
 
     for sql_file in sorted(bq_root.rglob("*.sql")):
+        # Skip temporary processing scripts (tmp_*) — they create and drop objects
+        # within a single run and never leave a permanent object in GCP.
+        if sql_file.stem.lower().startswith("tmp_"):
+            continue
+
         sql = sql_file.read_text(encoding="utf-8", errors="replace")
         rel_path = str(sql_file.relative_to(snapshot_dir)).replace("\\", "/")
 
