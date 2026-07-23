@@ -239,7 +239,8 @@ resource "google_bigquery_table" "env_drift_findings" {
     { name = "drift_category", type = "STRING" },
     { name = "source_hash", type = "STRING" },
     { name = "env_hash", type = "STRING" },
-    { name = "severity", type = "STRING" }
+    { name = "severity", type = "STRING" },
+    { name = "gcs_report_path", type = "STRING" }
   ])
 
   clustering = ["product", "component_type"]
@@ -289,6 +290,43 @@ resource "google_bigquery_table" "execution_daily_summary" {
         SAFE_DIVIDE(COUNTIF(status = 'success'), COUNT(*))   AS success_rate
       FROM `${var.reporting_project_id}.devops_reports.executions`
       GROUP BY 1, 2
+    EOT
+    use_legacy_sql = false
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Looker Studio view — per-repository env-drift summary with report link
+# ---------------------------------------------------------------------------
+# Connect to Looker Studio as a BigQuery data source:
+#   Looker Studio → Add data → BigQuery → Custom query → SELECT * FROM devops_reports.env_drift_summary
+# Set the report_url field type to URL in the data source settings.
+resource "google_bigquery_table" "env_drift_summary" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "env_drift_summary"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      SELECT
+        e.execution_id,
+        f.product                                                     AS repository,
+        DATE(e.execution_ts)                                          AS execution_date,
+        e.execution_ts,
+        ROW_NUMBER() OVER (
+          PARTITION BY f.product, DATE(e.execution_ts)
+          ORDER BY e.execution_ts
+        )                                                             AS run_number,
+        COUNTIF(f.component_type = 'bigquery')                        AS bq_findings,
+        COUNTIF(f.component_type = 'gcs')                             AS gcs_findings,
+        ANY_VALUE(f.gcs_report_path)                                  AS report_url
+      FROM `${var.reporting_project_id}.devops_reports.executions` e
+      JOIN `${var.reporting_project_id}.devops_reports.env_drift_findings` f
+        USING (execution_id)
+      WHERE e.report_type = 'env_drift'
+      GROUP BY
+        e.execution_id, f.product, e.execution_ts
     EOT
     use_legacy_sql = false
   }

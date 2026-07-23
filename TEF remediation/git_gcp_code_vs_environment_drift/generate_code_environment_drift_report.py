@@ -1291,6 +1291,12 @@ def main() -> int:
 
         upload_to_gcs(args.reports_gcs_bucket, args.reports_gcs_prefix, execution_id, report_root)
         gcs_path = f"gs://{args.reports_gcs_bucket}/{args.reports_gcs_prefix}/{execution_id}/"
+        # Authenticated HTTPS URL for the per-product report — captured here so it
+        # uses the same timestamp as the GCS folder name, not the later execution_ts.
+        gcs_report_url = (
+            f"https://storage.cloud.google.com/{args.reports_gcs_bucket}"
+            f"/{args.reports_gcs_prefix}/{execution_id}/{report_root.name}/report.md"
+        )
 
         # Dedup guard — skips BQ writes if this execution_id is already present.
         # Defense-in-depth against accidental duplicate runs with the same ID.
@@ -1316,6 +1322,7 @@ def main() -> int:
                     "source_hash": None,
                     "env_hash": None,
                     "severity": finding.get("severity"),
+                    "gcs_report_path": gcs_report_url,
                 }
                 for finding in bq_findings
             ],
@@ -1334,6 +1341,7 @@ def main() -> int:
                     "source_hash": None,
                     "env_hash": None,
                     "severity": finding.get("severity"),
+                    "gcs_report_path": gcs_report_url,
                 }
                 for finding in gcs_findings
             ],
