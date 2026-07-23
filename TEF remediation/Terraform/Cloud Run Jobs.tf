@@ -24,7 +24,7 @@ locals {
   # ENV_DRIFT_MAX_PARALLEL below) — needs more headroom than the single-process jobs,
   # which previously shared job_memory/job_cpu and were getting OOM-killed.
   env_drift_memory       = "4Gi"
-  env_drift_cpu          = "2"
+  env_drift_cpu          = "2000m"
   env_drift_max_parallel = "5"
 }
 
