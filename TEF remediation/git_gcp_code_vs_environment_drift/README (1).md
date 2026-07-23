@@ -78,16 +78,29 @@ python generate_code_environment_drift_report.py \
 |---|---|---|---|
 | `--project-name` | yes | — | Data product name (used for output folder naming) |
 | `--repo-path` | yes | — | Path to the local clone of the product repo |
-| `--gcp-project` | no | — | GCP project for source GCS bucket (Composer) |
+| `--gcp-project` | no | `tefde-gcp-fastoss-prod` | GCP project for source GCS bucket (Composer). Defaults to prod — specify explicitly when running outside Cloud Run. |
 | `--reporting-project` | no | `--gcp-project` | GCP project for `devops_reports` BQ dataset |
 | `--git-ref` | no | `production` | Git branch/ref for source comparison |
-| `--gcs-bucket` | no | — | Source GCS bucket (Composer DAGs) |
-| `--gcs-prefix` | no | — | Prefix inside the source GCS bucket |
+| `--gcs-bucket` | no | `fastoss-prod-composer-3` | Source GCS bucket (Composer DAGs). Defaults to the prod Composer bucket — override when targeting a different environment. |
+| `--gcs-prefix` | no | `dags/{project_name}` | Prefix inside the source GCS bucket. `{project_name}` is substituted at runtime. |
 | `--reports-gcs-bucket` | **yes** | — | GCS bucket for report output upload. **Required** — omitting it raises an error. |
 | `--reports-gcs-prefix` | no | `env-drift` | Prefix inside the reports GCS bucket |
 | `--output-dir` | no | `./outputs` | Local output root |
 | `--datasets` | no | — | Override dataset list (bypasses `.gitlab-ci.yml` lookup) |
 | `--source-mode` | no | `branch` | `branch` or `nexus` |
+| `--target-env` | no | `prod` | Environment label used in output and internal matching |
+| `--gcp-project-for-substitution` | no | `tefde-gcp-fastoss-prod` | Project qualifier stripped from SQL during DDL normalisation |
+| `--keep-workdir` | no | false | Retain the temp working directory after the run (useful for debugging) |
+| `--gcs-temp-root` | no | `/tmp` | Root path for GCS staging temp files |
+
+#### Nexus source mode (`--source-mode nexus`)
+
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `--nexus-base-url` | no | `https://dot-portal.de.pri.o2.com/nexus` | Nexus base URL |
+| `--nexus-repository` | no | derived from `--project-name` | Nexus repository name |
+| `--nexus-env` | no | `prod` | Nexus environment label |
+| `--nexus-version` | **yes** | — | Nexus artifact version. **Required** when `--source-mode nexus` — omitting it raises an error. |
 
 ### Environment variables
 

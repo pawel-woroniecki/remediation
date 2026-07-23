@@ -27,6 +27,7 @@ Timestamped folder, e.g. `outputs/ndl_core_unmatched_bq_datasets_20260514T120000
 |---|---|
 | `report.md` | Dataset-level summary |
 | `unmatched_datasets.csv` | One row per unmatched dataset |
+| `unmatched_datasets.json` | Full structured output: summary, unmatched datasets, and object-level detail |
 | `unmatched_objects.csv` | Object-level detail for unmatched datasets |
 | `dataset_errors.csv` | Datasets whose metadata could not be queried |
 | `repo_dataset_references.csv` | Repo-to-dataset mapping from `.gitlab-ci.yml` |
@@ -55,7 +56,7 @@ Triggered automatically by `entrypoint.sh` as `orphan_datasets` report type. All
 
 ```bash
 python unmatched_bq_datasets_report.py \
-  --gcp-project tefde-gcp-fastoss-prod \
+  --project-id tefde-gcp-fastoss-prod \
   --reporting-project tefde-gcp-fastoss-dev \
   --workspace-root /workspace/repos/fastossb \
   --subgroup ndl_core \
@@ -68,8 +69,9 @@ python unmatched_bq_datasets_report.py \
 
 | Argument | Required | Default | Description |
 |---|---|---|---|
-| `--gcp-project` | yes | — | BigQuery project to scan for datasets |
+| `--project-id` | no | `tefde-gcp-fastoss-prod` | BigQuery project to scan for datasets |
 | `--reporting-project` | no | `--gcp-project` | GCP project for the `devops_reports` BQ dataset |
+| `--gcp-project` | no | — | Alias for `--reporting-project`. **Not** the BQ scan project — use `--project-id` for that. |
 | `--workspace-root` | yes | — | Parent folder containing subgroup directories |
 | `--subgroup` | no | `ndl_core` | Subgroup folder under `--workspace-root` |
 | `--git-ref` | no | `production` | Git branch used when reading `.gitlab-ci.yml` |
@@ -77,7 +79,7 @@ python unmatched_bq_datasets_report.py \
 | `--gcs-bucket` | **yes** | — | GCS bucket for CSV upload. **Required** — omitting it raises an error. |
 | `--gcs-prefix` | no | `orphan-datasets` | GCS path prefix |
 | `--dataset-include-regex` | no | — | Only include matching datasets |
-| `--dataset-exclude-regex` | no | — | Exclude matching datasets |
+| `--dataset-exclude-regex` | no | `^_` | Exclude matching datasets. Default excludes hidden/system datasets whose names start with `_`. |
 
 ### Environment variables
 

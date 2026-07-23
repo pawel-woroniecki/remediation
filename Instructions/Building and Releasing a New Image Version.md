@@ -33,7 +33,7 @@ Edit the relevant script(s), commit, and push to the default branch:
 ```bash
 git add <changed files>
 git commit -m "describe the fix"
-git push github main
+git push origin main
 ```
 
 ## Step 2 — Build and push the image
@@ -146,6 +146,6 @@ If this change is significant enough to warrant a version tag (see `Readme.md`'s
 for the convention used so far, e.g. `v3.0.0`):
 ```bash
 git tag -a v3.1.0 -m "Release v3.1.0: <summary>"
-git push github main && git push github v3.1.0
+git push origin main && git push origin v3.1.0
 ```
 GitLab CI creates the release object automatically from the annotated tag message.

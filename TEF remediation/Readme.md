@@ -200,7 +200,7 @@ gcloud run jobs execute devops-reports-commit-drift \
 
 | Stage | Job | Trigger |
 |---|---|---|
-| `build` | `build-reports` | Changes to `Dockerfile.python`, report scripts, or `entrypoint.sh` |
+| `build` | `build-reports` | Changes to `Dockerfile.python`, `requirements.txt`, report scripts, or `entrypoint.sh` |
 | `terraform` | `terraform-plan` | Changes under `Terraform/` |
 | `release` | `create-release` | Tag push matching `v*` |
 
@@ -209,7 +209,7 @@ Each build job runs a **Trivy** vulnerability scan between `docker build` and `d
 To publish a release:
 ```bash
 git tag -a v3.1.0 -m "Release v3.1.0: <summary>"
-git push github main && git push github v3.1.0
+git push origin main && git push origin v3.1.0
 ```
 GitLab CI creates the release object automatically from the annotated tag message.
 
@@ -229,6 +229,8 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`, located in
 | `orphan_dataset_objects` | Objects inside orphan datasets |
 | `entities` | Reference catalogue |
 | `execution_daily_summary` *(view)* | Daily success/failure rates per report type — connect directly to Looker Studio |
+| `env_drift_summary` *(view)* | Per-repository env-drift summary: `bq_findings`, `gcs_findings`, `run_number`, and `report_url` (authenticated GCS link to the report file). Use as a Looker Studio data source for the env-drift dashboard. |
+| `management_dashboard` *(view)* | Management red/green health grid: joins env drift, commit drift, and file drift per repo × date into a single row with a `status` column (`All clear` / `Has findings`). Use as a Looker Studio data source for the executive summary dashboard. |
 
 ---
 

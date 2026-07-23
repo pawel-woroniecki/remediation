@@ -308,3 +308,71 @@ Choose the view that suits your audience:
   source, and re-paste the updated query.
 - See `Instructions/Running the Reports.md` for how the underlying data gets into BigQuery in
   the first place (scheduled and manual report runs).
+
+---
+
+## Pre-built BigQuery views (no custom SQL needed)
+
+Two additional views are already defined in `BQ DS + Tables.tf` and require no custom query — connect to them directly as table data sources.
+
+### `env_drift_summary` — per-repository env-drift dashboard
+
+**Connect:** Add data → BigQuery → `tefde-gcp-fastoss-dev` → `devops_reports` → `env_drift_summary`
+
+**Fields:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `repository` | Dimension | GitLab project name |
+| `execution_date` | Dimension / Date | Use as the date range field |
+| `run_number` | Dimension | Sequential run number per repo per day (1 = first run) |
+| `bq_findings` | Metric | Count of BigQuery drift findings |
+| `gcs_findings` | Metric | Count of GCS drift findings |
+| `report_url` | URL | Authenticated GCS link to the `report.md` file — set field type to **URL** in the data source settings |
+
+**Suggested chart layout:**
+1. **Table** — Dimensions: `repository`, `run_number`; Metrics: `bq_findings`, `gcs_findings`, `report_url`
+2. **Filter controls** — Date range (field: `execution_date`), Dropdown (field: `repository`), Dropdown (field: `run_number`)
+
+Set the `report_url` field type to **URL** in the data source settings so it renders as a clickable link in the table.
+
+---
+
+### `management_dashboard` — executive red/green health grid
+
+**Connect:** Add data → BigQuery → `tefde-gcp-fastoss-dev` → `devops_reports` → `management_dashboard`
+
+**Fields:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `repository` | Dimension | GitLab project name |
+| `run_date` | Dimension / Date | Use as the date range field |
+| `run_number` | Dimension | Sequential env-drift run number per day |
+| `bq_findings` | Metric | BigQuery drift findings count |
+| `gcs_findings` | Metric | GCS drift findings count |
+| `branch_drift` | Metric | Total unique commits across all branch comparisons (commit drift) |
+| `file_drift` | Metric | Total unique files across all branch comparisons (file drift) |
+| `status` | Dimension | `All clear` (all four metrics = 0) or `Has findings` |
+
+**Suggested chart layout:**
+
+1. **Calculated fields** — for each of the four metrics, create a calculated field that shows a dot for zero and the number for non-zero:
+   ```
+   IF(bq_findings = 0, "●", TEXT(bq_findings))
+   ```
+   Name these `GCP`, `GCS`, `Branch drift`, `File drift`.
+
+2. **Table** — Dimension: `repository`; Metrics: the four calculated fields. In the **Style** tab, add conditional formatting per column:
+   - Text **contains** `●` → font color `#1B8A00` (green)
+   - Text **does not contain** `●` → font color `#C62828` (red), bold
+
+3. **Filter controls:**
+
+   | Control | Type | Field | Purpose |
+   |---|---|---|---|
+   | Date | Date range picker | `run_date` | Select report date |
+   | Run | Dropdown | `run_number` | Select which run of the day |
+   | Status | Dropdown | `status` | Toggle between **All**, **Has findings**, **All clear** |
+
+4. **Optional scorecards** — four Scorecard charts at the top (one per metric, SUM aggregation) give a single-number summary for the selected filters.

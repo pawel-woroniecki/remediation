@@ -48,7 +48,7 @@ Each run writes to three destinations:
 | Argument | Required | Default | Description |
 |---|---|---|---|
 | `--root` | yes | — | Directory containing cloned repos |
-| `--gcp-project` | yes | — | GCP project ID |
+| `--gcp-project` | no | — | GCP project ID. Either `--gcp-project` or `--reporting-project` must be provided — the script raises an error if neither is set. |
 | `--reporting-project` | no | `--gcp-project` | GCP project for `devops_reports` dataset |
 | `--gcs-bucket` | **yes** | — | GCS bucket for CSV upload. **Required** — omitting it raises an error. |
 | `--gcs-prefix` | no | `branch-drift/commit` | GCS path prefix |
@@ -96,7 +96,7 @@ Generates file-content drift reports across `master`, `test`, and `production` b
 | Argument | Required | Default | Description |
 |---|---|---|---|
 | `--root` | yes | — | Directory containing cloned repos |
-| `--gcp-project` | yes | — | GCP project ID |
+| `--gcp-project` | no | — | GCP project ID. Either `--gcp-project` or `--reporting-project` must be provided — the script raises an error if neither is set. |
 | `--reporting-project` | no | `--gcp-project` | GCP project for `devops_reports` dataset |
 | `--compare-mode` | no | `merge_base` | `merge_base` or `direct` |
 | `--gcs-bucket` | **yes** | — | GCS bucket for CSV upload. **Required** — omitting it raises an error. |

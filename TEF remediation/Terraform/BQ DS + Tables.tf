@@ -332,6 +332,107 @@ resource "google_bigquery_table" "env_drift_summary" {
   }
 }
 
+# ---------------------------------------------------------------------------
+# Looker Studio view — management dashboard (red/green repo health grid)
+# ---------------------------------------------------------------------------
+# Connect to Looker Studio as a BigQuery data source:
+#   Looker Studio → Add data → BigQuery → devops_reports.management_dashboard
+# Create calculated fields IF(metric=0,"●",TEXT(metric)) per column, then
+# apply conditional formatting: "●" → green font, otherwise → red bold font.
+resource "google_bigquery_table" "management_dashboard" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "management_dashboard"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      WITH env_per_exec AS (
+        SELECT
+          e.execution_id,
+          f.product                              AS repo,
+          DATE(e.execution_ts)                   AS run_date,
+          e.execution_ts,
+          COUNTIF(f.component_type = 'bigquery') AS bq_findings,
+          COUNTIF(f.component_type = 'gcs')      AS gcs_findings
+        FROM `${var.reporting_project_id}.devops_reports.executions` e
+        JOIN `${var.reporting_project_id}.devops_reports.env_drift_findings` f
+          USING (execution_id)
+        WHERE e.report_type = 'env_drift'
+        GROUP BY e.execution_id, f.product, DATE(e.execution_ts), e.execution_ts
+      ),
+
+      env_with_run AS (
+        SELECT
+          *,
+          ROW_NUMBER() OVER (
+            PARTITION BY repo, run_date
+            ORDER BY execution_ts
+          ) AS run_number
+        FROM env_per_exec
+      ),
+
+      commit_latest AS (
+        SELECT
+          k.repo,
+          k.run_date,
+          SUM(CASE WHEN k.status = 'ok' THEN COALESCE(k.unique_commits, 0) ELSE 0 END)
+            AS branch_drift
+        FROM `${var.reporting_project_id}.devops_reports.branch_drift_kpis` k
+        JOIN `${var.reporting_project_id}.devops_reports.executions` e
+          USING (execution_id)
+        WHERE e.report_type = 'commit_drift'
+          AND k.drift_type = 'commit'
+        GROUP BY k.repo, k.run_date, k.execution_id, e.execution_ts
+        QUALIFY ROW_NUMBER() OVER (
+          PARTITION BY k.repo, k.run_date ORDER BY e.execution_ts DESC
+        ) = 1
+      ),
+
+      file_latest AS (
+        SELECT
+          k.repo,
+          k.run_date,
+          SUM(CASE WHEN k.status = 'ok' THEN COALESCE(k.unique_files, 0) ELSE 0 END)
+            AS file_drift
+        FROM `${var.reporting_project_id}.devops_reports.branch_drift_kpis` k
+        JOIN `${var.reporting_project_id}.devops_reports.executions` e
+          USING (execution_id)
+        WHERE e.report_type = 'file_drift'
+          AND k.drift_type = 'content'
+        GROUP BY k.repo, k.run_date, k.execution_id, e.execution_ts
+        QUALIFY ROW_NUMBER() OVER (
+          PARTITION BY k.repo, k.run_date ORDER BY e.execution_ts DESC
+        ) = 1
+      )
+
+      SELECT
+        COALESCE(env.repo, c.repo, f.repo)             AS repository,
+        COALESCE(env.run_date, c.run_date, f.run_date) AS run_date,
+        COALESCE(env.run_number, 1)                    AS run_number,
+        COALESCE(env.bq_findings,  0)                  AS bq_findings,
+        COALESCE(env.gcs_findings, 0)                  AS gcs_findings,
+        COALESCE(c.branch_drift,   0)                  AS branch_drift,
+        COALESCE(f.file_drift,     0)                  AS file_drift,
+        CASE
+          WHEN COALESCE(env.bq_findings, 0)
+             + COALESCE(env.gcs_findings, 0)
+             + COALESCE(c.branch_drift, 0)
+             + COALESCE(f.file_drift, 0) = 0
+          THEN 'All clear'
+          ELSE 'Has findings'
+        END                                            AS status
+      FROM env_with_run env
+      FULL OUTER JOIN commit_latest c
+        ON env.repo = c.repo AND env.run_date = c.run_date
+      FULL OUTER JOIN file_latest f
+        ON COALESCE(env.repo, c.repo) = f.repo
+       AND COALESCE(env.run_date, c.run_date) = f.run_date
+    EOT
+    use_legacy_sql = false
+  }
+}
+
 resource "google_bigquery_table" "orphan_dataset_objects" {
   project             = var.reporting_project_id
   dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
