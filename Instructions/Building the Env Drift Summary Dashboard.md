@@ -37,13 +37,15 @@ Before building charts, fix the field types so Looker Studio treats them correct
 
 1. **Insert → Table**.
 2. In the right panel, set:
-   - **Dimensions:** `repository`, `run_number`
-   - **Metrics:** `bq_findings`, `gcs_findings`, `report_url`
+   - **Dimensions:** `repository`, `run_number`, `report_url`
+   - **Metrics:** `bq_findings`, `gcs_findings`
 3. Under **Sort**: `repository` ascending (so repos appear alphabetically).
 4. Under **Rows per page**: set to **50** (covers all ~42 repos on one screen without paging).
 5. To make `report_url` show as a clickable label rather than a raw URL:
    - In the **Style** tab → find the `report_url` column → enable **Hyperlink**.
    - The cell renders as a clickable link that opens in a new tab.
+
+> **Important:** `report_url` must be placed in **Dimensions**, not Metrics. If placed in the Metric bucket, Looker Studio treats it as a number (Count Distinct) and the URL type is lost — you will only be able to choose Number or Currency as the data type, with no hyperlink option.
 
 ---
 

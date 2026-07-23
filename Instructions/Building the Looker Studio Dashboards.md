@@ -331,10 +331,12 @@ Two additional views are already defined in `BQ DS + Tables.tf` and require no c
 | `report_url` | URL | Authenticated GCS link to the `report.md` file — set field type to **URL** in the data source settings |
 
 **Suggested chart layout:**
-1. **Table** — Dimensions: `repository`, `run_number`; Metrics: `bq_findings`, `gcs_findings`, `report_url`
+1. **Table** — Dimensions: `repository`, `run_number`, `report_url`; Metrics: `bq_findings`, `gcs_findings`
 2. **Filter controls** — Date range (field: `execution_date`), Dropdown (field: `repository`), Dropdown (field: `run_number`)
 
-Set the `report_url` field type to **URL** in the data source settings so it renders as a clickable link in the table.
+Set the `report_url` field type to **URL** in the data source settings so it renders as a clickable link in the table. Then in the table's Style tab, find the `report_url` column and enable **Hyperlink**.
+
+> **Important:** `report_url` must be placed in **Dimensions**, not Metrics. If placed in the Metric bucket, Looker Studio treats it as a number (Count Distinct) and the URL type is lost.
 
 ---
 
