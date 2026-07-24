@@ -418,7 +418,7 @@ def extract_alter_operations(
         r"add\s+column(?:\s+if\s+not\s+exists)?\s+`?(?P<name>[\w\-]+)`?\s+(?P<dtype>[A-Z0-9_<>,]+)",
         sql, re.IGNORECASE,
     ):
-        add_cols[m.group("name")] = m.group("dtype").upper()
+        add_cols[m.group("name")] = m.group("dtype").upper().rstrip(",")
 
     for m in re.finditer(
         r"drop\s+column(?:\s+if\s+exists)?\s+`?(?P<name>[\w\-]+)`?",
