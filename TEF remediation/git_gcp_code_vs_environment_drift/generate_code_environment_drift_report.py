@@ -970,15 +970,18 @@ def compare_bigquery(
                 )
 
         if source.object_type in {"view", "materialized_view"}:
-            # GCP returns the view body only (no CREATE VIEW header) via view_definition.
-            # Strip the header from source so both sides are body-only before comparing.
+            # For plain views, BQ returns the SELECT body only via view_definition.
+            # For views with column-level OPTIONS (inline descriptions), BQ returns the
+            # full CREATE VIEW ... AS header. Strip the header from both sides to normalize.
             source_sql = normalize_sql(
                 strip_create_as_header(
                     strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id)
                 )
             )
             actual_sql = normalize_sql(
-                strip_redundant_project_qualifiers(actual.get("view_query") or actual.get("ddl") or "", project_id)
+                strip_create_as_header(
+                    strip_redundant_project_qualifiers(actual.get("view_query") or actual.get("ddl") or "", project_id)
+                )
             )
             if actual_sql and source_sql and source_sql != actual_sql:
                 findings.append(
