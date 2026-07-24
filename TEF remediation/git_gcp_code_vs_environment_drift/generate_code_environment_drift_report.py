@@ -162,6 +162,30 @@ def strip_redundant_project_qualifiers(sql: str, project_id: str) -> str:
     return result
 
 
+_BQ_TYPE_ALIASES: dict[str, str] = {
+    # Integer family — BigQuery stores all as INT64
+    "INTEGER": "INT64", "INT": "INT64", "SMALLINT": "INT64",
+    "TINYINT": "INT64", "BYTEINT": "INT64", "BIGINT": "INT64",
+    # Float family
+    "FLOAT": "FLOAT64",
+    # Boolean family
+    "BOOLEAN": "BOOL",
+    # Numeric family
+    "DECIMAL": "NUMERIC", "BIGDECIMAL": "BIGNUMERIC",
+}
+
+
+def canonical_bq_data_type(dtype: str) -> str:
+    """Resolve BigQuery column type aliases to their canonical names.
+
+    INFORMATION_SCHEMA always returns canonical names (INT64, BOOL, …) while DDL
+    files may use the accepted aliases (INTEGER, BOOLEAN, …).  Normalise both
+    sides before comparing so aliases never produce false type_mismatch findings.
+    """
+    key = dtype.upper().strip()
+    return _BQ_TYPE_ALIASES.get(key, key)
+
+
 def canonical_object_type(value: str | None) -> str:
     """Map equivalent BigQuery type labels to one canonical comparison value."""
     normalized = (value or "").strip().lower().replace(" ", "_")
@@ -911,7 +935,7 @@ def compare_bigquery(
             type_mismatch = sorted(
                 name
                 for name in set(source.columns) & set(actual_columns)
-                if source.columns[name].upper() != str(actual_columns[name]).upper()
+                if canonical_bq_data_type(source.columns[name]) != canonical_bq_data_type(str(actual_columns[name]))
             )
             if missing_in_prod or extra_in_prod or type_mismatch:
                 findings.append(
