@@ -441,6 +441,20 @@ def extract_alter_operations(
     return add_cols, drop_cols, rename_pairs, type_changes
 
 
+def _sql_version_key(path: Path) -> tuple:
+    """Sort key for DDL SQL files: (parent_dir, version_number, filename).
+
+    Base files with no _vN suffix get version 0 and always sort before versioned
+    files.  Versioned files sort in ascending numeric order (1, 2, 3 … 10, 11 …)
+    rather than lexicographically.  This neutralises filename typos that shift a
+    _vN file into an unexpected lexicographic position (e.g. celll…_v3.sql
+    sorting before cellstatus…_v2.sql because 'l' < 's'), which would otherwise
+    cause the base file to incorrectly supersede a later versioned DDL.
+    """
+    m = re.search(r"_v(\d+)\.sql$", path.name, re.IGNORECASE)
+    return (path.parent, int(m.group(1)) if m else 0, path.name)
+
+
 def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
     """Build a normalized inventory of source-side BigQuery objects from BQ DDL."""
     inventory: dict[str, SourceBqObject] = {}
@@ -448,7 +462,7 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
     if not bq_root.exists():
         return inventory
 
-    for sql_file in sorted(bq_root.rglob("*.sql")):
+    for sql_file in sorted(bq_root.rglob("*.sql"), key=_sql_version_key):
         # Skip temporary processing scripts (tmp_*) — they create and drop objects
         # within a single run and never leave a permanent object in GCP.
         if sql_file.stem.lower().startswith("tmp_"):
