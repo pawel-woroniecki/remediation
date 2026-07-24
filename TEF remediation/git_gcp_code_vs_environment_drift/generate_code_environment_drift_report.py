@@ -878,9 +878,11 @@ def compare_bigquery(
         # write into a *_tgt table; the model itself may or may not create a permanent
         # BQ object depending on project-level dbt_project.yml config.  Only treat
         # them as deployable (and therefore expected in BQ) when BQ actually has them.
+        # The materialized value in the file (None, 'table', etc.) is irrelevant —
+        # project-level overrides can make even explicit materialized='table' ephemeral
+        # at runtime (seen with merge_mw_equipment, merge_mw_links).
         and not (
             name.lower().startswith("merge_")
-            and model.get("materialized") is None
             and name not in actual_bq
         )
     }
