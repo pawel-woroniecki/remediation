@@ -90,6 +90,13 @@ case "$REPORT_TYPE" in
             [[ -d "$repo_path/.git" ]] || continue
             project_name=$(basename "$repo_path")
 
+            # Skip repos listed in EXCLUDE_REPOS (space-separated).
+            # Set via the Cloud Run Job env var; add more names separated by spaces.
+            if [[ " ${EXCLUDE_REPOS:-} " == *" $project_name "* ]]; then
+                log_json "INFO" "env_drift: skipping excluded repo $project_name"
+                continue
+            fi
+
             # Throttle: wait for a free slot before launching another repo.
             # "|| true" prevents set -e from triggering when the job we waited
             # on exited non-zero — failures are handled via the .exit file, not here.

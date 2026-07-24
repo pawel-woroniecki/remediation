@@ -134,6 +134,10 @@ resource "google_cloud_run_v2_job" "env_drift" {
           name  = "ENV_DRIFT_MAX_PARALLEL"
           value = local.env_drift_max_parallel
         }
+        env {
+          name  = "EXCLUDE_REPOS"
+          value = "demo_project"
+        }
 
         resources {
           limits = {
