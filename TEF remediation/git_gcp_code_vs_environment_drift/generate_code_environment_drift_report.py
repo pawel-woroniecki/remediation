@@ -832,7 +832,17 @@ def compare_bigquery(
     """Compare source-side BQ/dbt expectations with actual BigQuery objects in the selected target project."""
     findings: list[dict[str, Any]] = []
     deployable_dbt_names = {
-        name for name, model in source_dbt.items() if model.get("materialized") != "ephemeral"
+        name for name, model in source_dbt.items()
+        if model.get("materialized") != "ephemeral"
+        # merge_* dbt models with no explicit materialization use pre/post hooks to
+        # write into a *_tgt table; the model itself may or may not create a permanent
+        # BQ object depending on project-level dbt_project.yml config.  Only treat
+        # them as deployable (and therefore expected in BQ) when BQ actually has them.
+        and not (
+            name.lower().startswith("merge_")
+            and model.get("materialized") is None
+            and name not in actual_bq
+        )
     }
     expected_names = set(source_bq) | deployable_dbt_names
     actual_names = set(actual_bq)
