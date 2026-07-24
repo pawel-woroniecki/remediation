@@ -550,6 +550,12 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
         # the config block causes the simple Jinja-strip regex to leave hook SQL visible,
         # which would incorrectly trigger this check.
         stem_lower = sql_file.stem.lower()
+        # Mirror the BQ DDL convention (build_source_bq_inventory): tmp_* models are
+        # ephemeral/temp and never create permanent BigQuery objects, even when the
+        # per-file config says materialized='table' (project-level dbt_project.yml
+        # overrides take precedence at runtime).
+        if stem_lower.startswith("tmp_"):
+            continue
         is_dbt_model = bool(re.search(r"\{\{\s*config\s*\(", content, re.IGNORECASE))
         if not is_dbt_model and ("aggr" in stem_lower or "merge" in stem_lower):
             sql_body = re.sub(r"\{\{.*?\}\}", "", content, flags=re.DOTALL)
