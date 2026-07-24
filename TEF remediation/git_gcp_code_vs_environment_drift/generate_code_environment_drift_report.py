@@ -543,12 +543,6 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
         if "models" not in sql_file.parts:
             continue
         content = sql_file.read_text(encoding="utf-8", errors="replace")
-        # Skip aggregation/DML scripts: naming convention (aggr/merge in stem) AND
-        # body contains DML keywords confirm this is not a deployable dbt SELECT model.
-        # Exception: files with {{ config( are real dbt models even when they use
-        # pre/post hooks with UPDATE/INSERT/DROP — the nested {{ var('...') }} inside
-        # the config block causes the simple Jinja-strip regex to leave hook SQL visible,
-        # which would incorrectly trigger this check.
         stem_lower = sql_file.stem.lower()
         # Mirror the BQ DDL convention (build_source_bq_inventory): tmp_* models are
         # ephemeral/temp and never create permanent BigQuery objects, even when the
@@ -556,11 +550,19 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
         # overrides take precedence at runtime).
         if stem_lower.startswith("tmp_"):
             continue
+        # A real dbt model always contains Jinja syntax ({{ config(, {{ ref(, {{ source(,
+        # or {%...%} control blocks).  Files without any Jinja are plain SQL scripts that
+        # happened to land in models/; if they contain top-level DML (UPDATE, INSERT, etc.)
+        # they are not deployable SELECT models and must be skipped.
+        # Note: files that DO have Jinja (including {{ config( with pre/post hook DML) are
+        # real dbt models and are never skipped here — see compare_bigquery for the
+        # merge_* materialization guard that handles that category.
+        has_jinja = bool(re.search(r"\{\{|\{%", content))
+        if not has_jinja and re.search(
+            r"\b(?:merge|update|insert|delete|drop)\b", content, re.IGNORECASE
+        ):
+            continue
         is_dbt_model = bool(re.search(r"\{\{\s*config\s*\(", content, re.IGNORECASE))
-        if not is_dbt_model and ("aggr" in stem_lower or "merge" in stem_lower):
-            sql_body = re.sub(r"\{\{.*?\}\}", "", content, flags=re.DOTALL)
-            if re.search(r"\b(?:merge|update|drop)\b", sql_body, re.IGNORECASE):
-                continue
         materialized = extract_materialization(content)
         inventory[sql_file.stem] = {
             "object_name": sql_file.stem,
