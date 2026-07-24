@@ -109,6 +109,7 @@ python generate_code_environment_drift_report.py \
 | `EXECUTION_ID` | Regenerated per repo by `entrypoint.sh` inside the `env_drift` loop — each repo gets its own UUID and its own `executions` row. |
 | `TRIGGERED_BY` | Identity recorded in the `executions` BQ table for who triggered the run. Set by Cloud Scheduler or passed manually. Defaults to `"manual"`. |
 | `ENV_DRIFT_MAX_PARALLEL` | Max number of repos `entrypoint.sh` processes concurrently. Default `5`; set via Terraform in `Cloud Run Jobs.tf`. |
+| `EXCLUDE_REPOS` | Space-separated list of repo names to skip entirely (e.g. `demo_project`). Set via the `EXCLUDE_REPOS` env var in `Cloud Run Jobs.tf`. Repos matching a name in this list are skipped before any scan is run. |
 | `NEXUS_USER` | Nexus username (only for `--source-mode nexus`) |
 | `NEXUS_PASSWORD` | Nexus password (only for `--source-mode nexus`) |
 
