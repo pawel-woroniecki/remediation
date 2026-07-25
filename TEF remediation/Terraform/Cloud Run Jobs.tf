@@ -136,7 +136,7 @@ resource "google_cloud_run_v2_job" "env_drift" {
         }
         env {
           name  = "EXCLUDE_REPOS"
-          value = "demo_project"
+          value = "demo_*"
         }
 
         resources {

@@ -300,6 +300,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gcs-bucket", default=GCS_BUCKET_DEFAULT)
     parser.add_argument("--gcs-prefix", default=GCS_PREFIX_DEFAULT)
+    parser.add_argument(
+        "--exclude-repos",
+        default="",
+        help="Space-separated list of repo name patterns to skip (glob supported, e.g. 'demo_*').",
+    )
     return parser.parse_args()
 
 
@@ -332,6 +337,11 @@ def main() -> int:
 
         repos = sorted(p for p in root.iterdir() if p.is_dir() and (p / ".git").exists())
         log("INFO", f"Found {len(repos)} git repos", root=str(root))
+        if args.exclude_repos:
+            import fnmatch
+            exclude_patterns = args.exclude_repos.split()
+            repos = [p for p in repos if not any(fnmatch.fnmatch(p.name, pat) for pat in exclude_patterns)]
+            log("INFO", f"Repo exclusion active (patterns: {exclude_patterns}); {len(repos)} repos remain")
         log("INFO", "Compare mode", mode=args.compare_mode)
 
         output_root = Path(args.output_dir).resolve()

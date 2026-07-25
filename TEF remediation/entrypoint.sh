@@ -90,10 +90,16 @@ case "$REPORT_TYPE" in
             [[ -d "$repo_path/.git" ]] || continue
             project_name=$(basename "$repo_path")
 
-            # Skip repos listed in EXCLUDE_REPOS (space-separated).
-            # Set via the Cloud Run Job env var; add more names separated by spaces.
-            if [[ " ${EXCLUDE_REPOS:-} " == *" $project_name "* ]]; then
-                log_json "INFO" "env_drift: skipping excluded repo $project_name"
+            # Skip repos matching any pattern in EXCLUDE_REPOS (space-separated, glob supported).
+            # Uses bash case for glob matching so patterns like 'demo_*' work.
+            _excluded=0
+            for _pat in ${EXCLUDE_REPOS:-}; do
+                case "$project_name" in
+                    $_pat) _excluded=1; break ;;
+                esac
+            done
+            if [[ $_excluded -eq 1 ]]; then
+                log_json "INFO" "env_drift: skipping excluded repo $project_name (matches EXCLUDE_REPOS)"
                 continue
             fi
 
@@ -151,6 +157,7 @@ case "$REPORT_TYPE" in
 
         exec python3 "$SCRIPTS_DIR/report_branch_discrepancies_by_commit.py" \
             --root "$WORKSPACE_ROOT/$SUBGROUP" \
+            --exclude-repos "${EXCLUDE_REPOS:-}" \
             "$@"
         ;;
 
@@ -163,6 +170,7 @@ case "$REPORT_TYPE" in
 
         exec python3 "$SCRIPTS_DIR/report_branch_discrepancies_by_content.py" \
             --root "$WORKSPACE_ROOT/$SUBGROUP" \
+            --exclude-repos "${EXCLUDE_REPOS:-}" \
             "$@"
         ;;
 
