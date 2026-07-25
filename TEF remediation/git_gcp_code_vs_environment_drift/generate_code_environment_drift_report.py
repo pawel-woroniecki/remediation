@@ -1418,6 +1418,7 @@ def main() -> int:
             [{
                 "execution_id": execution_id,
                 "report_type": "env_drift",
+                "project_name": args.project_name,
                 "execution_ts": datetime.now(timezone.utc).isoformat(),
                 "environment": resolved_target_env,
                 "git_ref": args.git_ref if args.source_mode == "branch" else None,
@@ -1447,6 +1448,7 @@ def main() -> int:
                 [{
                     "execution_id": execution_id,
                     "report_type": "env_drift",
+                    "project_name": args.project_name,
                     "execution_ts": datetime.now(timezone.utc).isoformat(),
                     "environment": "prod",
                     "git_ref": args.git_ref if args.source_mode == "branch" else None,
@@ -1470,6 +1472,7 @@ def main() -> int:
                 [{
                     "execution_id": execution_id,
                     "report_type": "env_drift",
+                    "project_name": args.project_name,
                     "execution_ts": datetime.now(timezone.utc).isoformat(),
                     "environment": "prod",
                     "git_ref": args.git_ref if args.source_mode == "branch" else None,

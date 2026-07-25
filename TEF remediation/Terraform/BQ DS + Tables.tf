@@ -136,6 +136,7 @@ resource "google_bigquery_table" "executions" {
   schema = jsonencode([
     { name = "execution_id", type = "STRING", mode = "REQUIRED" },
     { name = "report_type", type = "STRING", mode = "REQUIRED" },
+    { name = "project_name", type = "STRING" },
     { name = "execution_ts", type = "TIMESTAMP", mode = "REQUIRED" },
     { name = "environment", type = "STRING" },
     { name = "git_ref", type = "STRING" },
@@ -350,16 +351,18 @@ resource "google_bigquery_table" "management_dashboard" {
       WITH env_per_exec AS (
         SELECT
           e.execution_id,
-          f.product                              AS repo,
+          COALESCE(e.project_name, f.product)    AS repo,
           DATE(e.execution_ts)                   AS run_date,
           e.execution_ts,
           COUNTIF(f.component_type = 'bigquery') AS bq_findings,
           COUNTIF(f.component_type = 'gcs')      AS gcs_findings
         FROM `${var.reporting_project_id}.devops_reports.executions` e
-        JOIN `${var.reporting_project_id}.devops_reports.env_drift_findings` f
+        LEFT JOIN `${var.reporting_project_id}.devops_reports.env_drift_findings` f
           USING (execution_id)
         WHERE e.report_type = 'env_drift'
-        GROUP BY e.execution_id, f.product, DATE(e.execution_ts), e.execution_ts
+          AND e.status = 'success'
+          AND COALESCE(e.project_name, f.product) IS NOT NULL
+        GROUP BY e.execution_id, COALESCE(e.project_name, f.product), DATE(e.execution_ts), e.execution_ts
       ),
 
       env_with_run AS (
