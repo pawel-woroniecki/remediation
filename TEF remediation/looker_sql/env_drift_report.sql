@@ -51,8 +51,8 @@ WITH latest_findings AS (
   JOIN `tefde-gcp-fastoss-dev.devops_reports.executions` e USING (execution_id)
   WHERE e.report_type = 'env_drift'
     AND e.status      = 'success'
-    AND e.environment = 'prod'
-  QUALIFY ROW_NUMBER() OVER (PARTITION BY f.product, e.environment ORDER BY e.execution_ts DESC) = 1
+    AND COALESCE(e.environment, 'prod') = 'prod'
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY f.product, COALESCE(e.environment, 'prod') ORDER BY e.execution_ts DESC) = 1
 ),
 
 summary AS (
@@ -155,8 +155,8 @@ WITH latest_findings AS (
   JOIN `tefde-gcp-fastoss-dev.devops_reports.executions` e USING (execution_id)
   WHERE e.report_type = 'env_drift'
     AND e.status      = 'success'
-    AND e.environment = 'prod'
-  QUALIFY ROW_NUMBER() OVER (PARTITION BY f.product, e.environment ORDER BY e.execution_ts DESC) = 1
+    AND COALESCE(e.environment, 'prod') = 'prod'
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY f.product, COALESCE(e.environment, 'prod') ORDER BY e.execution_ts DESC) = 1
 )
 
 SELECT
