@@ -15,6 +15,8 @@ locals {
   schedule_env_drift       = "10 5 * * *" # 05:10
   schedule_commit_drift    = "20 5 * * *" # 05:20
   schedule_file_drift      = "30 5 * * *" # 05:30 — staggered 10 min apart to avoid simultaneous clone load
+  schedule_env_drift_test  = "40 5 * * *" # 05:40
+  schedule_env_drift_dev   = "50 5 * * *" # 05:50
 }
 
 data "google_project" "this" {
@@ -130,6 +132,60 @@ resource "google_cloud_scheduler_job" "file_drift" {
 }
 
 # ---------------------------------------------------------------------------
+# Job 5: Environment vs Code Drift — Test environment
+# ---------------------------------------------------------------------------
+resource "google_cloud_scheduler_job" "env_drift_test" {
+  name      = "devops-reports-env-drift-test-trigger"
+  project   = var.project_id
+  region    = var.region
+  schedule  = local.schedule_env_drift_test
+  time_zone = local.scheduler_time_zone
+
+  depends_on = [google_project_service.cloudscheduler]
+
+  http_target {
+    uri         = "https://run.googleapis.com/v2/${google_cloud_run_v2_job.env_drift_test.id}:run"
+    http_method = "POST"
+    body        = base64encode("{}")
+
+    oauth_token {
+      service_account_email = var.cloud_run_sa_email
+    }
+  }
+
+  retry_config {
+    retry_count = 1
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Job 6: Environment vs Code Drift — Dev environment
+# ---------------------------------------------------------------------------
+resource "google_cloud_scheduler_job" "env_drift_dev" {
+  name      = "devops-reports-env-drift-dev-trigger"
+  project   = var.project_id
+  region    = var.region
+  schedule  = local.schedule_env_drift_dev
+  time_zone = local.scheduler_time_zone
+
+  depends_on = [google_project_service.cloudscheduler]
+
+  http_target {
+    uri         = "https://run.googleapis.com/v2/${google_cloud_run_v2_job.env_drift_dev.id}:run"
+    http_method = "POST"
+    body        = base64encode("{}")
+
+    oauth_token {
+      service_account_email = var.cloud_run_sa_email
+    }
+  }
+
+  retry_config {
+    retry_count = 1
+  }
+}
+
+# ---------------------------------------------------------------------------
 # IAM — allow the Cloud Scheduler service agent to mint OAuth tokens as the
 # runner SA. Without this, every scheduled invocation fails with a 403 at
 # firing time (not at terraform apply time).
@@ -151,6 +207,8 @@ output "scheduler_jobs" {
   value = {
     orphan_datasets = google_cloud_scheduler_job.orphan_datasets.name
     env_drift       = google_cloud_scheduler_job.env_drift.name
+    env_drift_test  = google_cloud_scheduler_job.env_drift_test.name
+    env_drift_dev   = google_cloud_scheduler_job.env_drift_dev.name
     commit_drift    = google_cloud_scheduler_job.commit_drift.name
     file_drift      = google_cloud_scheduler_job.file_drift.name
   }

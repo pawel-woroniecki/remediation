@@ -274,6 +274,148 @@ resource "google_cloud_run_v2_job" "file_drift" {
 }
 
 # ---------------------------------------------------------------------------
+# Job 5: Environment vs Code Drift — Test environment
+# ---------------------------------------------------------------------------
+resource "google_cloud_run_v2_job" "env_drift_test" {
+  name     = "devops-reports-env-drift-test"
+  location = local.job_region
+  project  = local.job_project
+
+  depends_on = [google_project_service.run]
+
+  template {
+    template {
+      service_account = local.runner_sa
+      timeout         = local.job_timeout
+      max_retries     = local.job_max_retries
+
+      containers {
+        image = local.job_image
+
+        args = [
+          "env_drift",
+          "--gcp-project",                  "tefde-gcp-fastoss-test",
+          "--reporting-project",            var.reporting_project_id,
+          "--reports-gcs-bucket",           var.reports_gcs_bucket,
+          "--gcs-bucket",                   "fastoss-test-composer-3",
+          "--target-env",                   "test",
+          "--git-ref",                      "test",
+          "--gcp-project-for-substitution", "tefde-gcp-fastoss-test",
+        ]
+
+        env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+        env {
+          name  = "GITLAB_TOKEN_SECRET_ID"
+          value = var.gitlab_token_secret_id
+        }
+        env {
+          name  = "SUBGROUP"
+          value = var.gitlab_subgroup
+        }
+        env {
+          name  = "ENV_DRIFT_MAX_PARALLEL"
+          value = local.env_drift_max_parallel
+        }
+        env {
+          name  = "EXCLUDE_REPOS"
+          value = "demo_*"
+        }
+
+        resources {
+          limits = {
+            memory = local.env_drift_memory
+            cpu    = local.env_drift_cpu
+          }
+        }
+      }
+
+      vpc_access {
+        connector = data.google_vpc_access_connector.devops_reports.id
+        egress    = "ALL_TRAFFIC"
+      }
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Job 6: Environment vs Code Drift — Dev environment
+# ---------------------------------------------------------------------------
+resource "google_cloud_run_v2_job" "env_drift_dev" {
+  name     = "devops-reports-env-drift-dev"
+  location = local.job_region
+  project  = local.job_project
+
+  depends_on = [google_project_service.run]
+
+  template {
+    template {
+      service_account = local.runner_sa
+      timeout         = local.job_timeout
+      max_retries     = local.job_max_retries
+
+      containers {
+        image = local.job_image
+
+        args = [
+          "env_drift",
+          "--gcp-project",                  "tefde-gcp-fastoss-dev-gke",
+          "--reporting-project",            var.reporting_project_id,
+          "--reports-gcs-bucket",           var.reports_gcs_bucket,
+          "--gcs-bucket",                   "fastoss-dev-composer-3",
+          "--target-env",                   "dev",
+          "--git-ref",                      "master",
+          "--gcp-project-for-substitution", "tefde-gcp-fastoss-dev-gke",
+        ]
+
+        env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+        env {
+          name  = "GITLAB_TOKEN_SECRET_ID"
+          value = var.gitlab_token_secret_id
+        }
+        env {
+          name  = "SUBGROUP"
+          value = var.gitlab_subgroup
+        }
+        env {
+          name  = "ENV_DRIFT_MAX_PARALLEL"
+          value = local.env_drift_max_parallel
+        }
+        env {
+          name  = "EXCLUDE_REPOS"
+          value = "demo_*"
+        }
+
+        resources {
+          limits = {
+            memory = local.env_drift_memory
+            cpu    = local.env_drift_cpu
+          }
+        }
+      }
+
+      vpc_access {
+        connector = data.google_vpc_access_connector.devops_reports.id
+        egress    = "ALL_TRAFFIC"
+      }
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Outputs
 # ---------------------------------------------------------------------------
 output "orphan_datasets_job_name" {
@@ -282,6 +424,14 @@ output "orphan_datasets_job_name" {
 
 output "env_drift_job_name" {
   value = google_cloud_run_v2_job.env_drift.name
+}
+
+output "env_drift_test_job_name" {
+  value = google_cloud_run_v2_job.env_drift_test.name
+}
+
+output "env_drift_dev_job_name" {
+  value = google_cloud_run_v2_job.env_drift_dev.name
 }
 
 output "commit_drift_job_name" {
