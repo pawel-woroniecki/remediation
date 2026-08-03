@@ -310,25 +310,37 @@ resource "google_bigquery_table" "env_drift_summary" {
 
   view {
     query = <<-EOT
+      WITH agg AS (
+        SELECT
+          e.execution_id,
+          COALESCE(e.environment, 'prod')        AS environment,
+          f.product                              AS repository,
+          DATE(e.execution_ts)                   AS execution_date,
+          e.execution_ts,
+          COUNTIF(f.component_type = 'bigquery') AS bq_findings,
+          COUNTIF(f.component_type = 'gcs')      AS gcs_findings,
+          ANY_VALUE(f.gcs_report_path)           AS report_url
+        FROM `${var.reporting_project_id}.devops_reports.executions` e
+        JOIN `${var.reporting_project_id}.devops_reports.env_drift_findings` f
+          USING (execution_id)
+        WHERE e.report_type = 'env_drift'
+        GROUP BY
+          e.execution_id, COALESCE(e.environment, 'prod'), f.product, e.execution_ts
+      )
       SELECT
-        e.execution_id,
-        COALESCE(e.environment, 'prod')                               AS environment,
-        f.product                                                     AS repository,
-        DATE(e.execution_ts)                                          AS execution_date,
-        e.execution_ts,
+        execution_id,
+        environment,
+        repository,
+        execution_date,
+        execution_ts,
         ROW_NUMBER() OVER (
-          PARTITION BY f.product, COALESCE(e.environment, 'prod'), DATE(e.execution_ts)
-          ORDER BY e.execution_ts
-        )                                                             AS run_number,
-        COUNTIF(f.component_type = 'bigquery')                        AS bq_findings,
-        COUNTIF(f.component_type = 'gcs')                             AS gcs_findings,
-        ANY_VALUE(f.gcs_report_path)                                  AS report_url
-      FROM `${var.reporting_project_id}.devops_reports.executions` e
-      JOIN `${var.reporting_project_id}.devops_reports.env_drift_findings` f
-        USING (execution_id)
-      WHERE e.report_type = 'env_drift'
-      GROUP BY
-        e.execution_id, COALESCE(e.environment, 'prod'), f.product, e.execution_ts
+          PARTITION BY repository, environment, execution_date
+          ORDER BY execution_ts
+        )                AS run_number,
+        bq_findings,
+        gcs_findings,
+        report_url
+      FROM agg
     EOT
     use_legacy_sql = false
   }
