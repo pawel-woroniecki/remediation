@@ -381,8 +381,18 @@ resource "google_bigquery_table" "management_dashboard" {
         SELECT
           k.repo,
           k.run_date,
-          SUM(CASE WHEN k.status = 'ok' THEN COALESCE(k.unique_commits, 0) ELSE 0 END)
-            AS branch_drift
+          SUM(CASE
+            WHEN k.status = 'ok'
+              AND (
+                (REGEXP_EXTRACT(k.right_branch, r'origin/(.+)') = 'production'
+                 AND REGEXP_EXTRACT(k.left_branch,  r'origin/(.+)') IN ('master','test'))
+                OR
+                (REGEXP_EXTRACT(k.right_branch, r'origin/(.+)') = 'test'
+                 AND REGEXP_EXTRACT(k.left_branch,  r'origin/(.+)') = 'master')
+              )
+            THEN COALESCE(k.unique_commits, 0)
+            ELSE 0
+          END) AS red_flags
         FROM `${var.reporting_project_id}.devops_reports.branch_drift_kpis` k
         JOIN `${var.reporting_project_id}.devops_reports.executions` e
           USING (execution_id)
@@ -417,12 +427,12 @@ resource "google_bigquery_table" "management_dashboard" {
         COALESCE(env.run_number, 1)                    AS run_number,
         COALESCE(env.bq_findings,  0)                  AS bq_findings,
         COALESCE(env.gcs_findings, 0)                  AS gcs_findings,
-        COALESCE(c.branch_drift,   0)                  AS branch_drift,
+        COALESCE(c.red_flags,      0)                  AS red_flags,
         COALESCE(f.file_drift,     0)                  AS file_drift,
         CASE
           WHEN COALESCE(env.bq_findings, 0)
              + COALESCE(env.gcs_findings, 0)
-             + COALESCE(c.branch_drift, 0)
+             + COALESCE(c.red_flags, 0)
              + COALESCE(f.file_drift, 0) = 0
           THEN 'All clear'
           ELSE 'Has findings'
