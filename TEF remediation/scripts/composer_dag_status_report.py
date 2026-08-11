@@ -16,7 +16,6 @@ Override defaults:
 """
 import argparse
 import csv
-import json
 import subprocess
 import sys
 
@@ -39,14 +38,21 @@ def run(cmd: list[str]) -> str:
 
 
 def list_composer_environments(project: str) -> list[dict]:
-    """Use gcloud CLI to list Composer environments — no extra Python packages needed."""
-    raw = run([
-        "gcloud", "composer", "environments", "list",
-        "--project", project,
-        "--locations", "-",
-        "--format", "json",
-    ])
-    return json.loads(raw) if raw else []
+    """List Composer environments via REST API using google-auth (always available in Cloud Shell).
+    The '-' wildcard location discovers environments across all regions."""
+    import google.auth
+    import google.auth.transport.requests
+
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    session = google.auth.transport.requests.AuthorizedSession(credentials)
+    resp = session.get(
+        f"https://composer.googleapis.com/v1/projects/{project}/locations/-/environments",
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json().get("environments", [])
 
 
 def get_identity_token() -> str:
