@@ -56,8 +56,8 @@ def get_composer_environment(project: str, location: str, environment: str) -> d
     return resp.json()
 
 
-def get_identity_token() -> str:
-    return run(["gcloud", "auth", "print-identity-token"])
+def get_identity_token(audience: str) -> str:
+    return run(["gcloud", "auth", "print-identity-token", f"--audiences={audience}"])
 
 
 def airflow_get(airflow_url: str, path: str, headers: dict) -> dict:
@@ -78,12 +78,14 @@ def main() -> None:
     args = parser.parse_args()
 
     # ── 1. Fetch the Composer environment ─────────────────────────────────────
-    env  = get_composer_environment(args.project, args.location, args.environment)
-    envs = [env]
+    env         = get_composer_environment(args.project, args.location, args.environment)
+    airflow_url = env["config"]["airflowUri"].rstrip("/")
+    envs        = [env]
     print(f"Environment: {args.environment}  ({args.location})\n")
 
     # ── 2. Identity token for IAP-protected Airflow webserver ─────────────────
-    token = get_identity_token()
+    # Audience must be the Airflow webserver URL, not the default oauth2 endpoint.
+    token   = get_identity_token(airflow_url)
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     # ── 3. Query each environment ─────────────────────────────────────────────
