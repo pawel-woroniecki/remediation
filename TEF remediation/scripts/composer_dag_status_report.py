@@ -72,7 +72,7 @@ def main() -> None:
     parser.add_argument("--output",  default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
-    # ── 1. Discover Composer environments via gcloud CLI ──────────────────────
+    # ── 1. Discover Composer environments via Composer REST API ───────────────
     envs = list_composer_environments(args.project)
     if not envs:
         print(f"No Composer environments found in {args.project}.")
@@ -86,7 +86,7 @@ def main() -> None:
     # ── 3. Query each environment ─────────────────────────────────────────────
     rows: list[dict] = []
     for env in envs:
-        # gcloud JSON uses dot-separated name: projects/P/locations/L/environments/E
+        # REST API name field: projects/P/locations/L/environments/E
         name        = env["name"]
         parts       = name.split("/")
         env_name    = parts[-1]
