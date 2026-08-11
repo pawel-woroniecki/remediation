@@ -39,7 +39,8 @@ def run(cmd: list[str]) -> str:
 
 def list_composer_environments(project: str) -> list[dict]:
     """List Composer environments via REST API using google-auth (always available in Cloud Shell).
-    The '-' wildcard location discovers environments across all regions."""
+    Composer v1 doesn't support the '-' location wildcard, so we first discover
+    available locations then query each one."""
     import google.auth
     import google.auth.transport.requests
 
@@ -47,12 +48,22 @@ def list_composer_environments(project: str) -> list[dict]:
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     session = google.auth.transport.requests.AuthorizedSession(credentials)
-    resp = session.get(
-        f"https://composer.googleapis.com/v1/projects/{project}/locations/-/environments",
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json().get("environments", [])
+    base = f"https://composer.googleapis.com/v1/projects/{project}"
+
+    # Step 1: discover which locations have Composer enabled
+    loc_resp = session.get(f"{base}/locations", timeout=30)
+    loc_resp.raise_for_status()
+    locations = [loc["locationId"] for loc in loc_resp.json().get("locations", [])]
+
+    # Step 2: list environments per location
+    all_envs: list[dict] = []
+    for location in locations:
+        env_resp = session.get(f"{base}/locations/{location}/environments", timeout=30)
+        if env_resp.status_code == 404:
+            continue
+        env_resp.raise_for_status()
+        all_envs.extend(env_resp.json().get("environments", []))
+    return all_envs
 
 
 def get_identity_token() -> str:
