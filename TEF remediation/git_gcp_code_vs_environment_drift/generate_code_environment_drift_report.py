@@ -350,7 +350,7 @@ _CTAS_RE = re.compile(
 )
 
 # Matches RENAME TO in ALTER TABLE statements — used to skip "old name" from inventory.
-_RENAME_TO_RE = re.compile(r"\brename\s+to\b", re.IGNORECASE)
+_RENAME_TO_RE = re.compile(r"\brename\s+to\s+`?(?P<new_name>[\w\-]+)`?", re.IGNORECASE)
 
 # ALTER TABLE pattern reused in build_source_bq_inventory.
 _ALTER_TABLE_RE = re.compile(
@@ -459,6 +459,7 @@ def _sql_version_key(path: Path) -> tuple:
 def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
     """Build a normalized inventory of source-side BigQuery objects from BQ DDL."""
     inventory: dict[str, SourceBqObject] = {}
+    table_renames: list[tuple[str, str]] = []  # (old_name, new_name)
     bq_root = snapshot_dir / "bq"
     if not bq_root.exists():
         return inventory
@@ -513,8 +514,12 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
 
         # Process ALTER TABLE if present.
         if alter_match:
-            # RENAME TO means the old name no longer exists in GCP — don't register it.
-            if _RENAME_TO_RE.search(sql):
+            # RENAME TO: collect the mapping and skip ALTER TABLE processing for
+            # the old name. The rename is applied to inventory after all files
+            # are processed, so the old entry is replaced by the new name.
+            rename_match = _RENAME_TO_RE.search(sql)
+            if rename_match:
+                table_renames.append((alter_match.group("object"), rename_match.group("new_name")))
                 continue
             ds = alter_match.group("dataset")
             obj = alter_match.group("object")
@@ -535,6 +540,15 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
                 entry.dataset = ds
             if entry.object_type in ("unknown", "alter_table"):
                 entry.object_type = "table"
+
+    # Apply TABLE-level renames from ALTER TABLE ... RENAME TO statements.
+    # Runs before column-operation transforms so any pending ALTER COLUMN changes
+    # on the renamed entry are applied under the correct new key.
+    for old_name, new_name in table_renames:
+        if old_name in inventory:
+            entry = inventory.pop(old_name)
+            entry.object_name = new_name
+            inventory[new_name] = entry
 
     # Apply DROP COLUMN, RENAME COLUMN, and SET DATA TYPE transformations from ALTER files.
     # Order matters: renames first, then type changes (a column may be renamed and then retyped).
