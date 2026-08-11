@@ -797,11 +797,16 @@ def stage_gcs_snapshot(
         area_warns: list[str] = []
         area_target = target_dir / area
         area_target.mkdir(parents=True, exist_ok=True)
+        # Each parallel download gets its own gcloud config dir so concurrent
+        # token-refresh writes don't race and corrupt each other's state.
+        area_config_dir = target_dir / f".gcloud_{area}"
+        area_config_dir.mkdir(parents=True, exist_ok=True)
+        area_env = {**os.environ, "CLOUDSDK_CONFIG": str(area_config_dir)}
         source_path = f"gs://{bucket}/{resolved_prefix}/{area}"
         try:
             run_command(
                 [gcloud_path, "storage", "cp", "--recursive", source_path, str(area_target)],
-                env=gcloud_env,
+                env=area_env,
             )
         except RuntimeError as exc:
             if "matched no objects or files" in str(exc):
