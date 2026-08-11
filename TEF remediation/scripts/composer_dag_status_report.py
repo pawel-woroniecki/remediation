@@ -5,7 +5,10 @@ One-off report: latest DAG run status for every DAG in a Cloud Composer environm
 Outputs a CSV file and a terminal summary.
 Each row includes a direct Airflow UI link so the reader can click through to the run.
 
-Usage (from Cloud Shell, authenticated as a project member):
+Uses `gcloud composer environments run` to execute Airflow CLI commands inside
+the environment — no IAP authentication required.
+
+Usage (from Cloud Shell, authenticated as a project member with roles/composer.user):
   python composer_dag_status_report.py
 
 Override defaults:
@@ -17,10 +20,10 @@ Override defaults:
 """
 import argparse
 import csv
+import json
+import re
 import subprocess
 import sys
-
-import requests
 
 DEFAULT_PROJECT = "tefde-gcp-fastoss-prod-gke"
 DEFAULT_OUTPUT  = "dag_status_report.csv"
@@ -34,12 +37,8 @@ STATUS_EMOJI = {
 }
 
 
-def run(cmd: list[str]) -> str:
-    return subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
-
-
 def get_composer_environment(project: str, location: str, environment: str) -> dict:
-    """Fetch a single Composer environment by its known project, location, and name."""
+    """Fetch a single Composer environment via REST API (no IAP needed)."""
     import google.auth
     import google.auth.transport.requests
 
@@ -56,45 +55,38 @@ def get_composer_environment(project: str, location: str, environment: str) -> d
     return resp.json()
 
 
-def get_iap_client_id(airflow_url: str) -> str:
-    """Discover the IAP OAuth2 client ID by following the full redirect chain.
+def run_airflow_cmd(
+    project: str,
+    location: str,
+    env_name: str,
+    airflow_cmd: list[str],
+    extra_args: list[str] | None = None,
+) -> list[dict]:
+    """Execute an Airflow CLI command inside Composer and return parsed JSON.
 
-    Composer routes unauthenticated requests through its own _signin page before
-    eventually landing on Google's OAuth2 page, which contains client_id= in the URL.
-    Follow up to 10 hops to find it.
+    gcloud composer environments run sends kubeconfig/status lines to stderr;
+    Airflow output goes to stdout. Extract the first valid JSON array found in
+    stdout, falling back to stderr if stdout has nothing.
     """
-    import urllib.parse
-
-    url = airflow_url
-    for _ in range(10):
-        resp = requests.get(url, allow_redirects=False)
-        location = resp.headers.get("location", "")
-        if not location:
-            break
-        location = urllib.parse.urljoin(url, location)  # handle relative URLs
-        params = urllib.parse.parse_qs(urllib.parse.urlparse(location).query)
-        if "client_id" in params:
-            return params["client_id"][0]
-        url = location
-
-    raise RuntimeError(
-        f"Could not discover IAP client ID from {airflow_url}. "
-        f"Last redirect: {url!r}"
+    cmd = (
+        ["gcloud", "composer", "environments", "run", env_name,
+         f"--location={location}", f"--project={project}"]
+        + airflow_cmd
+        + ["--", "--output", "json"] + (extra_args or [])
     )
-
-
-def get_identity_token(audience: str) -> str:
-    """Get OIDC identity token with the IAP client ID as audience."""
-    import google.auth.transport.requests
-    from google.oauth2.id_token import fetch_id_token
-    request = google.auth.transport.requests.Request()
-    return fetch_id_token(request, audience)
-
-
-def airflow_get(airflow_url: str, path: str, headers: dict) -> dict:
-    resp = requests.get(f"{airflow_url}{path}", headers=headers, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    for text in (result.stdout, result.stderr):
+        start = text.find("[")
+        if start < 0:
+            continue
+        end = text.rfind("]")
+        if end < start:
+            continue
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            continue
+    return []
 
 
 def main() -> None:
@@ -108,91 +100,80 @@ def main() -> None:
     parser.add_argument("--output",      default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
-    # ── 1. Fetch the Composer environment ─────────────────────────────────────
+    # ── 1. Fetch environment metadata for airflowUri and console link ──────────
     env         = get_composer_environment(args.project, args.location, args.environment)
     airflow_url = env["config"]["airflowUri"].rstrip("/")
-    envs        = [env]
-    print(f"Environment: {args.environment}  ({args.location})\n")
+    console_url = (
+        f"https://console.cloud.google.com/composer/environments/detail"
+        f"/{args.location}/{args.environment}/dags?project={args.project}"
+    )
+    print(f"Environment: {args.environment}  ({args.location})")
+    print(f"  Airflow UI : {airflow_url}")
+    print(f"  Console    : {console_url}\n")
 
-    # ── 2. Identity token for IAP-protected Airflow webserver ─────────────────
-    # The audience for fetch_id_token must be the IAP OAuth2 client ID, discovered
-    # by following the unauthenticated redirect from the Airflow URL.
-    iap_client_id = get_iap_client_id(airflow_url)
-    token         = get_identity_token(iap_client_id)
-    headers       = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    # ── 2. List all DAGs (≈30s) ────────────────────────────────────────────────
+    print("Fetching DAG list (≈30s)…")
+    dags_raw = run_airflow_cmd(
+        args.project, args.location, args.environment, ["dags", "list"]
+    )
+    if not dags_raw:
+        print("ERROR: could not retrieve DAG list. Check roles/composer.user on the project.")
+        sys.exit(1)
+    # Airflow 2 JSON uses "paused" (bool); guard against string "True"/"False"
+    dag_pause_map: dict[str, bool] = {
+        d["dag_id"]: str(d.get("paused", False)).lower() == "true"
+        for d in dags_raw
+    }
+    print(f"  {len(dag_pause_map)} DAG(s) found\n")
 
-    # ── 3. Query each environment ─────────────────────────────────────────────
+    # ── 3. List recent runs for all DAGs (≈30s) ────────────────────────────────
+    print("Fetching recent DAG runs (≈30s)…")
+    runs_raw = run_airflow_cmd(
+        args.project, args.location, args.environment,
+        ["dags", "list-runs"], ["--limit", "5000"]
+    )
+    # Runs come ordered by execution_date desc; first hit per dag_id is the latest
+    latest_run: dict[str, dict] = {}
+    for r in runs_raw:
+        did = r.get("dag_id", "")
+        if did and did not in latest_run:
+            latest_run[did] = r
+    print(f"  {len(runs_raw)} run(s) retrieved, {len(latest_run)} unique DAG(s) with runs\n")
+
+    # ── 4. Build rows ──────────────────────────────────────────────────────────
     rows: list[dict] = []
-    for env in envs:
-        # REST API name field: projects/P/locations/L/environments/E
-        name        = env["name"]
-        parts       = name.split("/")
-        env_name    = parts[-1]
-        location    = parts[3]
-        airflow_url = env["config"]["airflowUri"].rstrip("/")
-        console_url = (
-            f"https://console.cloud.google.com/composer/environments/detail"
-            f"/{location}/{env_name}/dags?project={args.project}"
-        )
-        print(f"Environment : {env_name}  ({location})")
-        print(f"  Airflow UI  : {airflow_url}")
-        print(f"  Console     : {console_url}")
+    for dag_id, is_paused in sorted(dag_pause_map.items()):
+        r = latest_run.get(dag_id)
+        if r:
+            state          = r.get("state", "unknown")
+            execution_date = str(r.get("execution_date", ""))[:19].replace("T", " ")
+            run_id         = r.get("run_id", "")
+            run_link       = f"{airflow_url}/dags/{dag_id}/grid?dag_run_id={run_id}"
+        else:
+            state, execution_date, run_id = "no_runs", "", ""
+            run_link = f"{airflow_url}/dags/{dag_id}/grid"
 
-        try:
-            dags_data = airflow_get(airflow_url, "/api/v1/dags?limit=500", headers)
-        except requests.HTTPError as exc:
-            print(f"  ⚠ Could not list DAGs: {exc}")
-            continue
+        icon        = STATUS_EMOJI.get(state, "❓")
+        paused_note = " [paused]" if is_paused else ""
+        print(f"  {icon}  {dag_id}{paused_note}  →  {state}  {execution_date}")
 
-        dags = dags_data.get("dags", [])
-        print(f"  {len(dags)} DAG(s)\n")
-
-        for dag in dags:
-            dag_id    = dag["dag_id"]
-            is_paused = dag.get("is_paused", False)
-
-            try:
-                runs_data = airflow_get(
-                    airflow_url,
-                    f"/api/v1/dags/{dag_id}/dagRuns?limit=1&order_by=-execution_date",
-                    headers,
-                )
-                run = (runs_data.get("dag_runs") or [None])[0]
-            except requests.HTTPError:
-                run = None
-
-            if run:
-                state          = run.get("state", "unknown")
-                execution_date = run.get("execution_date", "")[:19].replace("T", " ")
-                run_id         = run.get("dag_run_id", "")
-                run_link       = f"{airflow_url}/dags/{dag_id}/grid?dag_run_id={run_id}"
-            else:
-                state          = "no_runs"
-                execution_date = ""
-                run_id         = ""
-                run_link       = f"{airflow_url}/dags/{dag_id}/grid"
-
-            icon        = STATUS_EMOJI.get(state, "❓")
-            paused_note = " [paused]" if is_paused else ""
-            print(f"  {icon}  {dag_id}{paused_note}  →  {state}  {execution_date}")
-
-            rows.append({
-                "environment":      env_name,
-                "location":         location,
-                "dag_id":           dag_id,
-                "is_paused":        is_paused,
-                "latest_run_state": state,
-                "execution_date":   execution_date,
-                "run_id":           run_id,
-                "airflow_ui_link":  run_link,
-                "console_link":     console_url,
-            })
+        rows.append({
+            "environment":      args.environment,
+            "location":         args.location,
+            "dag_id":           dag_id,
+            "is_paused":        is_paused,
+            "latest_run_state": state,
+            "execution_date":   execution_date,
+            "run_id":           run_id,
+            "airflow_ui_link":  run_link,
+            "console_link":     console_url,
+        })
 
     if not rows:
         print("No DAG data collected.")
         sys.exit(1)
 
-    # ── 4. Write CSV ───────────────────────────────────────────────────────────
+    # ── 5. Write CSV ───────────────────────────────────────────────────────────
     fieldnames = [
         "environment", "location", "dag_id", "is_paused",
         "latest_run_state", "execution_date", "run_id",
@@ -203,7 +184,7 @@ def main() -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    # ── 5. Terminal summary ────────────────────────────────────────────────────
+    # ── 6. Terminal summary ────────────────────────────────────────────────────
     total   = len(rows)
     success = sum(1 for r in rows if r["latest_run_state"] == "success")
     failed  = sum(1 for r in rows if r["latest_run_state"] == "failed")
