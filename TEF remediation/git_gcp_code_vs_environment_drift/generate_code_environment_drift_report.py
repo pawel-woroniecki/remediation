@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import Forbidden, NotFound, PermissionDenied
 from google.cloud import bigquery, storage
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import argparse
 import csv
@@ -679,15 +680,47 @@ def fetch_bigquery_inventory(
     def _q(sql: str) -> list[dict[str, Any]]:
         return [dict(row) for row in bq.query(sql).result()]
 
+    # Build all (dataset × query-kind) tasks upfront so all fire in parallel.
+    tasks: list[tuple[str, str, str]] = []
     for dataset in datasets:
-        try:
-            table_rows   = _q(f"SELECT table_name, table_type, ddl FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.TABLES")
-            column_rows  = _q(f"SELECT table_name, column_name, data_type FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.COLUMNS")
-            routine_rows = _q(f"SELECT routine_name, routine_type, routine_definition FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.ROUTINES")
-            view_rows    = _q(f"SELECT table_name, view_definition FROM `{project_id}`.{dataset}.INFORMATION_SCHEMA.VIEWS")
-        except NotFound:
-            print(f"WARNING: dataset {project_id}:{dataset} not found in BigQuery — treating as absent (drift)")
+        p = f"`{project_id}`.{dataset}.INFORMATION_SCHEMA"
+        tasks += [
+            (dataset, "tables",   f"SELECT table_name, table_type, ddl FROM {p}.TABLES"),
+            (dataset, "columns",  f"SELECT table_name, column_name, data_type FROM {p}.COLUMNS"),
+            (dataset, "routines", f"SELECT routine_name, routine_type, routine_definition FROM {p}.ROUTINES"),
+            (dataset, "views",    f"SELECT table_name, view_definition FROM {p}.VIEWS"),
+        ]
+
+    results: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    not_found_datasets: set[str] = set()
+
+    with ThreadPoolExecutor(max_workers=min(len(tasks), 16)) as pool:
+        future_map = {pool.submit(_q, sql): (ds, kind) for ds, kind, sql in tasks}
+        for future in as_completed(future_map):
+            ds, kind = future_map[future]
+            try:
+                results[(ds, kind)] = future.result()
+            except NotFound:
+                not_found_datasets.add(ds)
+            except (Forbidden, PermissionDenied) as exc:
+                raise RuntimeError(
+                    f"Permission denied reading {project_id}:{ds} INFORMATION_SCHEMA. "
+                    f"Grant roles/bigquery.metadataViewer and roles/bigquery.jobUser "
+                    f"to the runner service account on project {project_id}. "
+                    f"Original error: {exc}"
+                ) from exc
+
+    for ds in not_found_datasets:
+        log("WARNING", "Dataset not found in BigQuery — treating as absent (drift)",
+            project=project_id, dataset=ds)
+
+    for dataset in datasets:
+        if dataset in not_found_datasets:
             continue
+        table_rows   = results.get((dataset, "tables"),   [])
+        column_rows  = results.get((dataset, "columns"),  [])
+        routine_rows = results.get((dataset, "routines"), [])
+        view_rows    = results.get((dataset, "views"),    [])
 
         for row in table_rows:
             inventory[row["table_name"]] = {
@@ -758,29 +791,30 @@ def stage_gcs_snapshot(
     gcloud_config_dir = target_dir / ".gcloud"
     gcloud_config_dir.mkdir(parents=True, exist_ok=True)
     gcloud_env = {**os.environ, "CLOUDSDK_CONFIG": str(gcloud_config_dir)}
-    for area in ("dbt", "python"):
+    resolved_prefix = gcs_prefix.format(project_name=project_name)
+
+    def _download(area: str) -> list[str]:
+        area_warns: list[str] = []
         area_target = target_dir / area
         area_target.mkdir(parents=True, exist_ok=True)
-        resolved_prefix = gcs_prefix.format(project_name=project_name)
         source_path = f"gs://{bucket}/{resolved_prefix}/{area}"
         try:
             run_command(
-                [
-                    gcloud_path,
-                    "storage",
-                    "cp",
-                    "--recursive",
-                    source_path,
-                    str(area_target),
-                ],
+                [gcloud_path, "storage", "cp", "--recursive", source_path, str(area_target)],
                 env=gcloud_env,
             )
         except RuntimeError as exc:
-            message = str(exc)
-            if "matched no objects or files" in message:
-                warnings.append(f"GCS path missing: {source_path}")
-                continue
-            raise
+            if "matched no objects or files" in str(exc):
+                area_warns.append(f"GCS path missing: {source_path}")
+            else:
+                raise
+        return area_warns
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(_download, area) for area in ("dbt", "python")]
+        for f in futures:
+            warnings.extend(f.result())
+
     return target_dir, warnings
 
 
@@ -890,6 +924,8 @@ def compare_bigquery(
     actual_names = set(actual_bq)
 
     for object_name in sorted(actual_names - expected_names):
+        if object_name.lower().startswith("merge_"):
+            continue
         actual = actual_bq[object_name]
         findings.append(
             {
@@ -907,6 +943,8 @@ def compare_bigquery(
         )
 
     for object_name in sorted(expected_names - actual_names):
+        if object_name.lower().startswith("merge_"):
+            continue
         source_kind = "bq" if object_name in source_bq else "dbt_model"
         details = "Object exists in the selected source snapshot but not in the selected GCP dataset inventory."
         findings.append(
@@ -1242,6 +1280,32 @@ def main() -> int:
     # Resolve before try so the except handler can always reference it.
     reporting_project = args.reporting_project or args.gcp_project
     workdir_obj = None
+
+    def _record_execution(exec_status: str) -> None:
+        if bq_client is None:
+            return
+        try:
+            write_to_bigquery(
+                bq_client,
+                f"{reporting_project}.devops_reports.executions",
+                [{
+                    "execution_id":     execution_id,
+                    "report_type":      "env_drift",
+                    "project_name":     args.project_name,
+                    "execution_ts":     datetime.now(timezone.utc).isoformat(),
+                    "environment":      args.target_env,
+                    "git_ref":          args.git_ref if args.source_mode == "branch" else None,
+                    "source_mode":      args.source_mode,
+                    "triggered_by":     triggered_by,
+                    "status":           exec_status,
+                    "duration_seconds": int(time.monotonic() - start_time),
+                    "gcs_path":         gcs_path,
+                }],
+            )
+        except Exception as write_err:
+            log("ERROR", "Failed to write execution record to BigQuery",
+                intended_status=exec_status, error=str(write_err))
+
     try:
         repo_path = Path(args.repo_path)
         ensure_exists(repo_path, "Repo path")
@@ -1370,8 +1434,6 @@ def main() -> int:
             log("WARNING", "Execution already recorded — skipping BQ writes", execution_id=execution_id)
             return 0
 
-        duration_seconds = int(time.monotonic() - start_time)
-
         # Write BQ after GCS so every row has a gcs_path and any BQ failure
         # is captured as status=failed in the except block.
         write_to_bigquery(
@@ -1412,23 +1474,7 @@ def main() -> int:
                 for finding in gcs_findings
             ],
         )
-        write_to_bigquery(
-            bq_client,
-            f"{reporting_project}.devops_reports.executions",
-            [{
-                "execution_id": execution_id,
-                "report_type": "env_drift",
-                "project_name": args.project_name,
-                "execution_ts": datetime.now(timezone.utc).isoformat(),
-                "environment": args.target_env,
-                "git_ref": args.git_ref if args.source_mode == "branch" else None,
-                "source_mode": args.source_mode,
-                "triggered_by": triggered_by,
-                "status": status,
-                "duration_seconds": duration_seconds,
-                "gcs_path": gcs_path,
-            }],
-        )
+        _record_execution("success")
 
         if args.keep_workdir:
             shutil.copytree(snapshot_dir, report_root / "rendered_source_snapshot", dirs_exist_ok=True)
@@ -1441,48 +1487,12 @@ def main() -> int:
         # projects) — record it distinctly so it doesn't read as a failure.
         status = "skipped"
         log("WARNING", "Skipped — branch not found", execution_id=execution_id, reason=str(exc))
-        if bq_client is not None:
-            write_to_bigquery(
-                bq_client,
-                f"{reporting_project}.devops_reports.executions",
-                [{
-                    "execution_id": execution_id,
-                    "report_type": "env_drift",
-                    "project_name": args.project_name,
-                    "execution_ts": datetime.now(timezone.utc).isoformat(),
-                    "environment": args.target_env,
-                    "git_ref": args.git_ref if args.source_mode == "branch" else None,
-                    "source_mode": args.source_mode,
-                    "triggered_by": triggered_by,
-                    "status": "skipped",
-                    "duration_seconds": int(time.monotonic() - start_time),
-                    "gcs_path": gcs_path,
-                }],
-            )
+        _record_execution("skipped")
         return 0
 
     except Exception:
         status = "failed"
-        # Guard against bq_client being None when the failure occurs before
-        # the client is initialised.
-        if bq_client is not None:
-            write_to_bigquery(
-                bq_client,
-                f"{reporting_project}.devops_reports.executions",
-                [{
-                    "execution_id": execution_id,
-                    "report_type": "env_drift",
-                    "project_name": args.project_name,
-                    "execution_ts": datetime.now(timezone.utc).isoformat(),
-                    "environment": args.target_env,
-                    "git_ref": args.git_ref if args.source_mode == "branch" else None,
-                    "source_mode": args.source_mode,
-                    "triggered_by": triggered_by,
-                    "status": "failed",
-                    "duration_seconds": int(time.monotonic() - start_time),
-                    "gcs_path": gcs_path,
-                }],
-            )
+        _record_execution("failed")
         raise
 
     finally:
