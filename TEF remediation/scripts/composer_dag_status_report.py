@@ -57,23 +57,30 @@ def get_composer_environment(project: str, location: str, environment: str) -> d
 
 
 def get_iap_client_id(airflow_url: str) -> str:
-    """Discover the IAP OAuth2 client ID by following the unauthenticated redirect.
+    """Discover the IAP OAuth2 client ID by following the full redirect chain.
 
-    When you hit an IAP-protected URL without a token, IAP redirects to Google's
-    OAuth2 page with ?client_id=<ID>. That client_id is the correct audience for
-    fetch_id_token, not the Airflow URL itself.
+    Composer routes unauthenticated requests through its own _signin page before
+    eventually landing on Google's OAuth2 page, which contains client_id= in the URL.
+    Follow up to 10 hops to find it.
     """
     import urllib.parse
-    resp = requests.get(airflow_url, allow_redirects=False)
-    location = resp.headers.get("location", "")
-    params = urllib.parse.parse_qs(urllib.parse.urlparse(location).query)
-    client_ids = params.get("client_id", [])
-    if not client_ids:
-        raise RuntimeError(
-            f"Could not discover IAP client ID from {airflow_url}. "
-            f"Redirect location: {location!r}"
-        )
-    return client_ids[0]
+
+    url = airflow_url
+    for _ in range(10):
+        resp = requests.get(url, allow_redirects=False)
+        location = resp.headers.get("location", "")
+        if not location:
+            break
+        location = urllib.parse.urljoin(url, location)  # handle relative URLs
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(location).query)
+        if "client_id" in params:
+            return params["client_id"][0]
+        url = location
+
+    raise RuntimeError(
+        f"Could not discover IAP client ID from {airflow_url}. "
+        f"Last redirect: {url!r}"
+    )
 
 
 def get_identity_token(audience: str) -> str:
