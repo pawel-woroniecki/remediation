@@ -56,13 +56,28 @@ def get_composer_environment(project: str, location: str, environment: str) -> d
     return resp.json()
 
 
-def get_identity_token(audience: str) -> str:
-    """Get OIDC identity token with the Airflow URL as audience.
+def get_iap_client_id(airflow_url: str) -> str:
+    """Discover the IAP OAuth2 client ID by following the unauthenticated redirect.
 
-    Uses the GCE metadata server (available in Cloud Shell) via google.oauth2.id_token.
-    gcloud auth print-identity-token cannot set a custom audience for user accounts,
-    and Composer IAP requires the audience to be the Airflow webserver URL.
+    When you hit an IAP-protected URL without a token, IAP redirects to Google's
+    OAuth2 page with ?client_id=<ID>. That client_id is the correct audience for
+    fetch_id_token, not the Airflow URL itself.
     """
+    import urllib.parse
+    resp = requests.get(airflow_url, allow_redirects=False)
+    location = resp.headers.get("location", "")
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(location).query)
+    client_ids = params.get("client_id", [])
+    if not client_ids:
+        raise RuntimeError(
+            f"Could not discover IAP client ID from {airflow_url}. "
+            f"Redirect location: {location!r}"
+        )
+    return client_ids[0]
+
+
+def get_identity_token(audience: str) -> str:
+    """Get OIDC identity token with the IAP client ID as audience."""
     import google.auth.transport.requests
     from google.oauth2.id_token import fetch_id_token
     request = google.auth.transport.requests.Request()
@@ -93,9 +108,11 @@ def main() -> None:
     print(f"Environment: {args.environment}  ({args.location})\n")
 
     # ── 2. Identity token for IAP-protected Airflow webserver ─────────────────
-    # Audience must be the Airflow webserver URL, not the default oauth2 endpoint.
-    token   = get_identity_token(airflow_url)
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    # The audience for fetch_id_token must be the IAP OAuth2 client ID, discovered
+    # by following the unauthenticated redirect from the Airflow URL.
+    iap_client_id = get_iap_client_id(airflow_url)
+    token         = get_identity_token(iap_client_id)
+    headers       = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     # ── 3. Query each environment ─────────────────────────────────────────────
     rows: list[dict] = []
