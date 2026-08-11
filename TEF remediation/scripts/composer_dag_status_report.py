@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-One-off report: latest DAG run status for every DAG in every Composer environment
-in a GCP project.
+One-off report: latest DAG run status for every DAG in a Cloud Composer environment.
 
 Outputs a CSV file and a terminal summary.
 Each row includes a direct Airflow UI link so the reader can click through to the run.
@@ -11,8 +10,10 @@ Usage (from Cloud Shell, authenticated as a project member):
 
 Override defaults:
   python composer_dag_status_report.py \
-      --project tefde-gcp-fastoss-prod-gke \
-      --output dag_report.csv
+      --project     tefde-gcp-fastoss-prod-gke \
+      --location    europe-west3 \
+      --environment fastoss-prod-composer-3 \
+      --output      dag_report.csv
 """
 import argparse
 import csv
@@ -37,10 +38,8 @@ def run(cmd: list[str]) -> str:
     return subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
 
 
-def list_composer_environments(project: str) -> list[dict]:
-    """List Composer environments via REST API using google-auth (always available in Cloud Shell).
-    Composer v1 doesn't support the '-' location wildcard, so we first discover
-    available locations then query each one."""
+def get_composer_environment(project: str, location: str, environment: str) -> dict:
+    """Fetch a single Composer environment by its known project, location, and name."""
     import google.auth
     import google.auth.transport.requests
 
@@ -48,22 +47,13 @@ def list_composer_environments(project: str) -> list[dict]:
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     session = google.auth.transport.requests.AuthorizedSession(credentials)
-    base = f"https://composer.googleapis.com/v1/projects/{project}"
-
-    # Step 1: discover which locations have Composer enabled
-    loc_resp = session.get(f"{base}/locations", timeout=30)
-    loc_resp.raise_for_status()
-    locations = [loc["locationId"] for loc in loc_resp.json().get("locations", [])]
-
-    # Step 2: list environments per location
-    all_envs: list[dict] = []
-    for location in locations:
-        env_resp = session.get(f"{base}/locations/{location}/environments", timeout=30)
-        if env_resp.status_code == 404:
-            continue
-        env_resp.raise_for_status()
-        all_envs.extend(env_resp.json().get("environments", []))
-    return all_envs
+    url = (
+        f"https://composer.googleapis.com/v1/projects/{project}"
+        f"/locations/{location}/environments/{environment}"
+    )
+    resp = session.get(url, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def get_identity_token() -> str:
@@ -79,16 +69,18 @@ def airflow_get(airflow_url: str, path: str, headers: dict) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--project", default=DEFAULT_PROJECT)
-    parser.add_argument("--output",  default=DEFAULT_OUTPUT)
+    parser.add_argument("--project",     default=DEFAULT_PROJECT)
+    parser.add_argument("--location",    default="europe-west3",
+                        help="GCP region the Composer environment lives in")
+    parser.add_argument("--environment", default="fastoss-prod-composer-3",
+                        help="Composer environment name")
+    parser.add_argument("--output",      default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
-    # ── 1. Discover Composer environments via Composer REST API ───────────────
-    envs = list_composer_environments(args.project)
-    if not envs:
-        print(f"No Composer environments found in {args.project}.")
-        sys.exit(1)
-    print(f"Found {len(envs)} environment(s) in {args.project}\n")
+    # ── 1. Fetch the Composer environment ─────────────────────────────────────
+    env  = get_composer_environment(args.project, args.location, args.environment)
+    envs = [env]
+    print(f"Environment: {args.environment}  ({args.location})\n")
 
     # ── 2. Identity token for IAP-protected Airflow webserver ─────────────────
     token = get_identity_token()

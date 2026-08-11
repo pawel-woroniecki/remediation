@@ -67,11 +67,13 @@ cd ~/remediation
 python "TEF remediation/scripts/composer_dag_status_report.py"
 ```
 
-Override project or output file if needed:
+All parameters have sensible defaults. Override any of them if needed:
 ```bash
 python "TEF remediation/scripts/composer_dag_status_report.py" \
-  --project tefde-gcp-fastoss-prod-gke \
-  --output dag_report.csv
+  --project     tefde-gcp-fastoss-prod-gke \
+  --location    europe-west3 \
+  --environment fastoss-prod-composer-3 \
+  --output      dag_report.csv
 ```
 
 **Output**
