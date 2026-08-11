@@ -119,7 +119,7 @@ def normalize_sql(sql: str) -> str:
     sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
     sql = sql.replace("`", "")
     sql = re.sub(r"\s+", " ", sql)
-    return sql.strip().lower()
+    return sql.strip().lower().rstrip(";").strip()
 
 
 def _strip_outer_parens(sql: str) -> str:
