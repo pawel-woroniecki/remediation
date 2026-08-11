@@ -57,7 +57,16 @@ def get_composer_environment(project: str, location: str, environment: str) -> d
 
 
 def get_identity_token(audience: str) -> str:
-    return run(["gcloud", "auth", "print-identity-token", f"--audiences={audience}"])
+    """Get OIDC identity token with the Airflow URL as audience.
+
+    Uses the GCE metadata server (available in Cloud Shell) via google.oauth2.id_token.
+    gcloud auth print-identity-token cannot set a custom audience for user accounts,
+    and Composer IAP requires the audience to be the Airflow webserver URL.
+    """
+    import google.auth.transport.requests
+    from google.oauth2.id_token import fetch_id_token
+    request = google.auth.transport.requests.Request()
+    return fetch_id_token(request, audience)
 
 
 def airflow_get(airflow_url: str, path: str, headers: dict) -> dict:
