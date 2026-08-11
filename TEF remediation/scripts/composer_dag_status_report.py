@@ -16,11 +16,11 @@ Override defaults:
 """
 import argparse
 import csv
+import json
 import subprocess
 import sys
 
 import requests
-from google.cloud.orchestration.airflow.service_v1 import EnvironmentsClient
 
 DEFAULT_PROJECT = "tefde-gcp-fastoss-prod-gke"
 DEFAULT_OUTPUT  = "dag_status_report.csv"
@@ -34,10 +34,23 @@ STATUS_EMOJI = {
 }
 
 
+def run(cmd: list[str]) -> str:
+    return subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
+
+
+def list_composer_environments(project: str) -> list[dict]:
+    """Use gcloud CLI to list Composer environments — no extra Python packages needed."""
+    raw = run([
+        "gcloud", "composer", "environments", "list",
+        "--project", project,
+        "--locations", "-",
+        "--format", "json",
+    ])
+    return json.loads(raw) if raw else []
+
+
 def get_identity_token() -> str:
-    return subprocess.check_output(
-        ["gcloud", "auth", "print-identity-token"], stderr=subprocess.DEVNULL
-    ).decode().strip()
+    return run(["gcloud", "auth", "print-identity-token"])
 
 
 def airflow_get(airflow_url: str, path: str, headers: dict) -> dict:
@@ -53,11 +66,8 @@ def main() -> None:
     parser.add_argument("--output",  default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
-    # ── 1. Discover Composer environments ─────────────────────────────────────
-    client = EnvironmentsClient()
-    envs = list(client.list_environments(
-        parent=f"projects/{args.project}/locations/-"
-    ))
+    # ── 1. Discover Composer environments via gcloud CLI ──────────────────────
+    envs = list_composer_environments(args.project)
     if not envs:
         print(f"No Composer environments found in {args.project}.")
         sys.exit(1)
@@ -70,9 +80,12 @@ def main() -> None:
     # ── 3. Query each environment ─────────────────────────────────────────────
     rows: list[dict] = []
     for env in envs:
-        env_name    = env.name.split("/")[-1]
-        location    = env.name.split("/")[3]
-        airflow_url = env.config.airflow_uri.rstrip("/")
+        # gcloud JSON uses dot-separated name: projects/P/locations/L/environments/E
+        name        = env["name"]
+        parts       = name.split("/")
+        env_name    = parts[-1]
+        location    = parts[3]
+        airflow_url = env["config"]["airflowUri"].rstrip("/")
         console_url = (
             f"https://console.cloud.google.com/composer/environments/detail"
             f"/{location}/{env_name}/dags?project={args.project}"
