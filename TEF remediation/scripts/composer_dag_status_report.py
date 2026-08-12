@@ -24,6 +24,7 @@ import json
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 DEFAULT_PROJECT = "tefde-gcp-fastoss-prod-gke"
 DEFAULT_OUTPUT  = "dag_status_report.csv"
@@ -66,9 +67,8 @@ def run_airflow_cmd(
 
     gcloud composer environments run echoes the command as:
       Executing the command: [ airflow ... ]...
-    A naive text.find("[") picks up that bracket, not the JSON array.
-    We instead look for "[" only at the START of a line (re.MULTILINE),
-    which matches the actual JSON array output but not the command echo.
+    We look for "[" only at the START of a line (re.MULTILINE) so the bracket
+    in that echo is ignored and we match the actual JSON array output.
     """
     cmd = (
         ["gcloud", "composer", "environments", "run", env_name,
@@ -87,11 +87,22 @@ def run_airflow_cmd(
                 return json.loads(text[start : end + 1])
             except json.JSONDecodeError:
                 continue
-    # Nothing parseable — print raw output to help diagnose
-    print(f"  [warn] no JSON found in output of: {' '.join(airflow_cmd)}")
-    print(f"  [warn] stdout: {result.stdout[:400]!r}")
-    print(f"  [warn] stderr: {result.stderr[:400]!r}")
     return []
+
+
+def get_latest_run_for_dag(
+    project: str,
+    location: str,
+    env_name: str,
+    dag_id: str,
+) -> tuple[str, dict | None]:
+    """Fetch the most recent DAG run for a single DAG. Returns (dag_id, run_dict or None)."""
+    runs = run_airflow_cmd(
+        project, location, env_name,
+        ["dags", "list-runs"], ["--dag-id", dag_id]
+    )
+    # list-runs returns runs ordered execution_date desc; first entry is the latest
+    return dag_id, (runs[0] if runs else None)
 
 
 def main() -> None:
@@ -103,6 +114,8 @@ def main() -> None:
     parser.add_argument("--environment", default="fastoss-prod-composer-3",
                         help="Composer environment name")
     parser.add_argument("--output",      default=DEFAULT_OUTPUT)
+    parser.add_argument("--workers",     type=int, default=10,
+                        help="Parallel workers for per-DAG run queries (default: 10)")
     args = parser.parse_args()
 
     # ── 1. Fetch environment metadata for airflowUri and console link ──────────
@@ -126,19 +139,35 @@ def main() -> None:
     }
     print(f"  {len(dag_pause_map)} DAG(s) found\n")
 
-    # ── 3. List recent runs for all DAGs (≈30s) ────────────────────────────────
-    print("Fetching recent DAG runs (≈30s)…")
-    runs_raw = run_airflow_cmd(
-        args.project, args.location, args.environment,
-        ["dags", "list-runs"],
+    # ── 3. Fetch the latest run for each DAG (parallel per-DAG calls) ────────────
+    # airflow dags list-runs without --dag-id returns [] in Airflow 2.10;
+    # per-DAG calls with --dag-id are required. We parallelise to stay fast.
+    total_dags = len(dag_pause_map)
+    print(
+        f"Fetching latest run for {total_dags} DAG(s) using {args.workers} parallel workers…"
+        f"\n  Estimated time: {total_dags // args.workers * 10 // 60}–"
+        f"{total_dags // args.workers * 30 // 60} min depending on cluster latency."
     )
-    # Runs come ordered by execution_date desc; first hit per dag_id is the latest
     latest_run: dict[str, dict] = {}
-    for r in runs_raw:
-        did = r.get("dag_id", "")
-        if did and did not in latest_run:
-            latest_run[did] = r
-    print(f"  {len(runs_raw)} run(s) retrieved, {len(latest_run)} unique DAG(s) with runs\n")
+    done = 0
+
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = {
+            pool.submit(
+                get_latest_run_for_dag,
+                args.project, args.location, args.environment, dag_id
+            ): dag_id
+            for dag_id in dag_pause_map
+        }
+        for future in as_completed(futures):
+            dag_id, run = future.result()
+            if run:
+                latest_run[dag_id] = run
+            done += 1
+            if done % 100 == 0 or done == total_dags:
+                print(f"  {done}/{total_dags} queried…")
+
+    print(f"  {len(latest_run)} DAG(s) have at least one run\n")
 
     # ── 4. Build rows ──────────────────────────────────────────────────────────
     rows: list[dict] = []
