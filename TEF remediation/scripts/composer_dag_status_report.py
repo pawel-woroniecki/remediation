@@ -64,9 +64,11 @@ def run_airflow_cmd(
 ) -> list[dict]:
     """Execute an Airflow CLI command inside Composer and return parsed JSON.
 
-    gcloud composer environments run sends kubeconfig/status lines to stderr;
-    Airflow output goes to stdout. Extract the first valid JSON array found in
-    stdout, falling back to stderr if stdout has nothing.
+    gcloud composer environments run echoes the command as:
+      Executing the command: [ airflow ... ]...
+    A naive text.find("[") picks up that bracket, not the JSON array.
+    We instead look for "[" only at the START of a line (re.MULTILINE),
+    which matches the actual JSON array output but not the command echo.
     """
     cmd = (
         ["gcloud", "composer", "environments", "run", env_name,
@@ -74,18 +76,21 @@ def run_airflow_cmd(
         + airflow_cmd
         + ["--", "--output", "json"] + (extra_args or [])
     )
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     for text in (result.stdout, result.stderr):
-        start = text.find("[")
-        if start < 0:
-            continue
-        end = text.rfind("]")
-        if end < start:
-            continue
-        try:
-            return json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            continue
+        for match in re.finditer(r"^\[", text, re.MULTILINE):
+            start = match.start()
+            end = text.rfind("]", start)
+            if end < start:
+                continue
+            try:
+                return json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                continue
+    # Nothing parseable — print raw output to help diagnose
+    print(f"  [warn] no JSON found in output of: {' '.join(airflow_cmd)}")
+    print(f"  [warn] stdout: {result.stdout[:400]!r}")
+    print(f"  [warn] stderr: {result.stderr[:400]!r}")
     return []
 
 
