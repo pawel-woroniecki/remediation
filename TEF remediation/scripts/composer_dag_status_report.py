@@ -103,13 +103,8 @@ def main() -> None:
     # ── 1. Fetch environment metadata for airflowUri and console link ──────────
     env         = get_composer_environment(args.project, args.location, args.environment)
     airflow_url = env["config"]["airflowUri"].rstrip("/")
-    console_url = (
-        f"https://console.cloud.google.com/composer/environments/detail"
-        f"/{args.location}/{args.environment}/dags?project={args.project}"
-    )
     print(f"Environment: {args.environment}  ({args.location})")
-    print(f"  Airflow UI : {airflow_url}")
-    print(f"  Console    : {console_url}\n")
+    print(f"  Airflow UI : {airflow_url}\n")
 
     # ── 2. List all DAGs (≈30s) ────────────────────────────────────────────────
     print("Fetching DAG list (≈30s)…")
@@ -130,7 +125,7 @@ def main() -> None:
     print("Fetching recent DAG runs (≈30s)…")
     runs_raw = run_airflow_cmd(
         args.project, args.location, args.environment,
-        ["dags", "list-runs"], ["--limit", "5000"]
+        ["dags", "list-runs"],
     )
     # Runs come ordered by execution_date desc; first hit per dag_id is the latest
     latest_run: dict[str, dict] = {}
@@ -166,7 +161,6 @@ def main() -> None:
             "execution_date":   execution_date,
             "run_id":           run_id,
             "airflow_ui_link":  run_link,
-            "console_link":     console_url,
         })
 
     if not rows:
@@ -177,7 +171,7 @@ def main() -> None:
     fieldnames = [
         "environment", "location", "dag_id", "is_paused",
         "latest_run_state", "execution_date", "run_id",
-        "airflow_ui_link", "console_link",
+        "airflow_ui_link",
     ]
     with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
