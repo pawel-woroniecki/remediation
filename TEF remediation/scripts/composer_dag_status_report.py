@@ -25,6 +25,7 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 
 DEFAULT_PROJECT = "tefde-gcp-fastoss-prod-gke"
 DEFAULT_OUTPUT  = "dag_status_report.csv"
@@ -76,7 +77,10 @@ def run_airflow_cmd(
         + airflow_cmd
         + ["--", "--output", "json"] + (extra_args or [])
     )
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        return []
     for text in (result.stdout, result.stderr):
         for match in re.finditer(r"^\[", text, re.MULTILINE):
             start = match.start()
@@ -95,11 +99,17 @@ def get_latest_run_for_dag(
     location: str,
     env_name: str,
     dag_id: str,
+    start_date: str,
 ) -> tuple[str, dict | None]:
-    """Fetch the most recent DAG run for a single DAG. Returns (dag_id, run_dict or None)."""
+    """Fetch the most recent DAG run for a single DAG. Returns (dag_id, run_dict or None).
+
+    start_date (YYYY-MM-DD) limits the query window so high-frequency DAGs
+    (e.g. airflow_monitoring running every minute) don't return millions of rows
+    and time out.
+    """
     runs = run_airflow_cmd(
         project, location, env_name,
-        ["dags", "list-runs"], ["--dag-id", dag_id]
+        ["dags", "list-runs"], ["--dag-id", dag_id, "--start-date", start_date]
     )
     # list-runs returns runs ordered execution_date desc; first entry is the latest
     return dag_id, (runs[0] if runs else None)
@@ -114,9 +124,11 @@ def main() -> None:
     parser.add_argument("--environment", default="fastoss-prod-composer-3",
                         help="Composer environment name")
     parser.add_argument("--output",      default=DEFAULT_OUTPUT)
-    parser.add_argument("--workers",     type=int, default=10,
-                        help="Parallel workers for per-DAG run queries (default: 10)")
-    parser.add_argument("--dag-limit",   type=int, default=0,
+    parser.add_argument("--workers",          type=int, default=3,
+                        help="Parallel workers for per-DAG run queries (default: 3)")
+    parser.add_argument("--run-window-days",  type=int, default=90,
+                        help="Only look at runs in the last N days (default: 90)")
+    parser.add_argument("--dag-limit",        type=int, default=0,
                         help="Cap number of DAGs queried (0 = all); use for testing")
     args = parser.parse_args()
 
@@ -147,9 +159,14 @@ def main() -> None:
     # ── 3. Fetch the latest run for each DAG (parallel per-DAG calls) ────────────
     # airflow dags list-runs without --dag-id returns [] in Airflow 2.10;
     # per-DAG calls with --dag-id are required. We parallelise to stay fast.
+    # --start-date caps the query window so high-frequency DAGs don't time out.
+    start_date = (
+        datetime.now(timezone.utc) - timedelta(days=args.run_window_days)
+    ).strftime("%Y-%m-%d")
     total_dags = len(dag_pause_map)
     print(
         f"Fetching latest run for {total_dags} DAG(s) using {args.workers} parallel workers…"
+        f"\n  Run window  : {start_date} → now ({args.run_window_days} days)"
         f"\n  Estimated time: {total_dags // args.workers * 10 // 60}–"
         f"{total_dags // args.workers * 30 // 60} min depending on cluster latency."
     )
@@ -160,7 +177,7 @@ def main() -> None:
         futures = {
             pool.submit(
                 get_latest_run_for_dag,
-                args.project, args.location, args.environment, dag_id
+                args.project, args.location, args.environment, dag_id, start_date
             ): dag_id
             for dag_id in dag_pause_map
         }
