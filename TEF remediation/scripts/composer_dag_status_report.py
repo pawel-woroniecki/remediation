@@ -116,6 +116,8 @@ def main() -> None:
     parser.add_argument("--output",      default=DEFAULT_OUTPUT)
     parser.add_argument("--workers",     type=int, default=10,
                         help="Parallel workers for per-DAG run queries (default: 10)")
+    parser.add_argument("--dag-limit",   type=int, default=0,
+                        help="Cap number of DAGs queried (0 = all); use for testing")
     args = parser.parse_args()
 
     # ── 1. Fetch environment metadata for airflowUri and console link ──────────
@@ -138,6 +140,9 @@ def main() -> None:
         for d in dags_raw
     }
     print(f"  {len(dag_pause_map)} DAG(s) found\n")
+    if args.dag_limit > 0:
+        dag_pause_map = dict(list(dag_pause_map.items())[:args.dag_limit])
+        print(f"  [--dag-limit] capped to {len(dag_pause_map)} DAG(s) for testing\n")
 
     # ── 3. Fetch the latest run for each DAG (parallel per-DAG calls) ────────────
     # airflow dags list-runs without --dag-id returns [] in Airflow 2.10;
