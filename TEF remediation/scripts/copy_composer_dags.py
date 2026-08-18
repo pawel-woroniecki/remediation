@@ -4,8 +4,10 @@ One-off script: clone the dags/ folder from the prod Composer GCS bucket into
 the dags2/ folder of the test or dev Composer bucket.
 
 - Folder structure is preserved (dags/a/b/c.py → dags2/a/b/c.py).
-- YAML files (.yml / .yaml) have every occurrence of "prod" replaced with the
-  target word ("test" or "dev") before upload.
+- YAML (.yml/.yaml) and Python (.py) files have every whole-word occurrence of
+  "prod" replaced with the target word ("test" or "dev") before upload.
+  Uses word-boundary matching (\bprod\b) so words like "produkt" or "product"
+  are left untouched.
 - All other file types are copied server-side without downloading.
 
 Usage:
@@ -23,6 +25,7 @@ Dry run (lists actions without writing):
   python copy_composer_dags.py --target test --dry-run
 """
 import argparse
+import re
 import sys
 
 from google.cloud import storage
@@ -35,7 +38,7 @@ DEFAULT_DST_BUCKETS = {
 
 SRC_PREFIX = "dags/"
 DST_PREFIX = "dags2/"
-YAML_EXTENSIONS = {".yml", ".yaml"}
+TEXT_EXTENSIONS = {".yml", ".yaml", ".py"}  # files that receive the prod→target substitution
 
 
 def copy_dags(
@@ -55,11 +58,11 @@ def copy_dags(
 
     print(f"Source      : gs://{src_bucket_name}/{SRC_PREFIX}")
     print(f"Destination : gs://{dst_bucket_name}/{DST_PREFIX}")
-    print(f"Target word : {target_word!r}  (replacing 'prod' in YAML files)")
+    print(f"Target word : {target_word!r}  (replacing whole-word 'prod' in .yml/.yaml/.py files)")
     print(f"Dry run     : {dry_run}")
     print(f"Files found : {len(blobs)}\n")
 
-    yaml_count   = 0
+    text_count   = 0
     copied_count = 0
 
     for blob in blobs:
@@ -71,22 +74,22 @@ def copy_dags(
         dst_name = DST_PREFIX + relative
 
         ext = "." + blob.name.rsplit(".", 1)[-1].lower() if "." in blob.name else ""
-        is_yaml = ext in YAML_EXTENSIONS
+        is_text = ext in TEXT_EXTENSIONS
 
-        if is_yaml:
-            action = f"[yaml] {blob.name}  →  {dst_name}  (replace 'prod'→'{target_word}')"
+        if is_text:
+            action = f"[{ext.lstrip('.')}] {blob.name}  →  {dst_name}  (\\bprod\\b→'{target_word}')"
         else:
             action = f"[copy] {blob.name}  →  {dst_name}"
 
         print(action)
 
         if not dry_run:
-            if is_yaml:
+            if is_text:
                 content = blob.download_as_text(encoding="utf-8")
-                patched = content.replace("prod", target_word)
+                patched = re.sub(r"\bprod\b", target_word, content)
                 dst_blob = dst_bucket.blob(dst_name)
                 dst_blob.upload_from_string(patched, content_type=blob.content_type or "text/plain")
-                yaml_count += 1
+                text_count += 1
             else:
                 src_bucket.copy_blob(blob, dst_bucket, dst_name)
 
@@ -94,10 +97,15 @@ def copy_dags(
 
     print(f"\n{'─' * 60}")
     if dry_run:
+        text_total = sum(
+            1 for b in blobs
+            if not b.name.endswith("/") and "." in b.name
+            and "." + b.name.rsplit(".", 1)[-1].lower() in TEXT_EXTENSIONS
+        )
         print(f"Dry run complete — {copied_count} file(s) would be processed "
-              f"({sum(1 for b in blobs if not b.name.endswith('/') and '.' in b.name and b.name.rsplit('.', 1)[-1].lower() in {'yml', 'yaml'})} YAML).")
+              f"({text_total} with text substitution).")
     else:
-        print(f"Done — {copied_count} file(s) copied ({yaml_count} YAML patched).")
+        print(f"Done — {copied_count} file(s) copied ({text_count} with text substitution).")
         print(f"Destination: gs://{dst_bucket_name}/{DST_PREFIX}")
 
 
