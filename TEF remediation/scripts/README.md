@@ -49,7 +49,46 @@ touches rows where `gcs_report_path IS NULL`.
 
 ---
 
-### 2. `composer_dag_status_report.py`
+### 2. `copy_composer_dags.py`
+
+**Purpose**
+Clones the `dags/` folder from the production Composer GCS bucket into the `dags2/`
+folder of the test or dev Composer bucket. The full nested folder structure is preserved.
+YAML files (`.yml` / `.yaml`) have every occurrence of the word `"prod"` replaced with
+`"test"` or `"dev"` before upload. All other file types are copied server-side without
+downloading.
+
+**IAM required**
+- `roles/storage.objectViewer` on the production bucket (to read)
+- `roles/storage.objectAdmin` on the target bucket (to write)
+
+**Run**
+```bash
+cd ~/remediation
+
+# Copy prod → test (dry run first to preview)
+python "TEF remediation/scripts/copy_composer_dags.py" --target test --dry-run
+python "TEF remediation/scripts/copy_composer_dags.py" --target test
+
+# Copy prod → dev
+python "TEF remediation/scripts/copy_composer_dags.py" --target dev
+```
+
+If the actual GCS bucket name differs from the default (e.g. includes a hash suffix),
+override with `--src-bucket` / `--dst-bucket`:
+```bash
+python "TEF remediation/scripts/copy_composer_dags.py" \
+  --target     test \
+  --src-bucket europe-west3-fastoss-prod-composer-3-abc123-bucket \
+  --dst-bucket europe-west3-fastoss-test-composer-3-def456-bucket
+```
+
+**Output**
+Prints one line per file (`[yaml]` or `[copy]`) and a final summary count.
+
+---
+
+### 3. `composer_dag_status_report.py`
 
 **Purpose**
 Produces a snapshot report of the latest run status for every DAG in every Cloud
