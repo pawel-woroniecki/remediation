@@ -118,8 +118,7 @@ python "TEF remediation/scripts/composer_dag_status_report.py" \
 **Output**
 - Live terminal progress with status emoji per DAG
 - `dag_status_report.csv` (default) containing: `environment`, `location`, `dag_id`,
-  `is_paused`, `latest_run_state`, `execution_date`, `run_id`, `airflow_ui_link`,
-  `console_link`
+  `is_paused`, `latest_run_state`, `execution_date`, `run_id`, `airflow_ui_link`
 
 Import the CSV into **Google Sheets** (`File → Import`) to get clickable links in the
 `airflow_ui_link` column that open directly in the Airflow UI.
