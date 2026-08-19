@@ -350,7 +350,12 @@ _CTAS_RE = re.compile(
 )
 
 # Matches RENAME TO in ALTER TABLE statements — used to skip "old name" from inventory.
-_RENAME_TO_RE = re.compile(r"\brename\s+to\s+`?(?P<new_name>[\w\-]+)`?", re.IGNORECASE)
+# Skips optional project. and dataset. qualifiers so the captured new_name is always
+# just the table identifier, regardless of how many qualifiers precede it.
+_RENAME_TO_RE = re.compile(
+    r"\brename\s+to\s+(?:`?[\w\-]+`?\.)*`?(?P<new_name>[\w\-]+)`?",
+    re.IGNORECASE,
+)
 
 # ALTER TABLE pattern reused in build_source_bq_inventory.
 _ALTER_TABLE_RE = re.compile(
@@ -456,13 +461,13 @@ def _sql_version_key(path: Path) -> tuple:
     return (path.parent, int(m.group(1)) if m else 0, path.name)
 
 
-def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
+def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObject], set[str]]:
     """Build a normalized inventory of source-side BigQuery objects from BQ DDL."""
     inventory: dict[str, SourceBqObject] = {}
     table_renames: list[tuple[str, str]] = []  # (old_name, new_name)
     bq_root = snapshot_dir / "bq"
     if not bq_root.exists():
-        return inventory
+        return inventory, set()
 
     for sql_file in sorted(bq_root.rglob("*.sql"), key=_sql_version_key):
         # Skip temporary processing scripts (tmp_*) — they create and drop objects
@@ -544,7 +549,11 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
     # Apply TABLE-level renames from ALTER TABLE ... RENAME TO statements.
     # Runs before column-operation transforms so any pending ALTER COLUMN changes
     # on the renamed entry are applied under the correct new key.
+    # renamed_away_names tracks the original names so compare_bigquery can suppress
+    # false-positive only_in_source findings for dbt models that were renamed away.
+    renamed_away_names: set[str] = set()
     for old_name, new_name in table_renames:
+        renamed_away_names.add(old_name)
         if old_name in inventory:
             entry = inventory.pop(old_name)
             entry.object_name = new_name
@@ -562,7 +571,7 @@ def build_source_bq_inventory(snapshot_dir: Path) -> dict[str, SourceBqObject]:
             if col in entry.columns:
                 entry.columns[col] = new_type
 
-    return inventory
+    return inventory, renamed_away_names
 
 
 def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
@@ -921,8 +930,10 @@ def compare_bigquery(
     source_dbt: dict[str, dict[str, Any]],
     actual_bq: dict[str, dict[str, Any]],
     project_id: str,
+    renamed_away_names: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Compare source-side BQ/dbt expectations with actual BigQuery objects in the selected target project."""
+    renamed_away_names = renamed_away_names or set()
     findings: list[dict[str, Any]] = []
     deployable_dbt_names = {
         name for name, model in source_dbt.items()
@@ -961,7 +972,7 @@ def compare_bigquery(
             }
         )
 
-    for object_name in sorted(expected_names - actual_names):
+    for object_name in sorted((expected_names - actual_names) - renamed_away_names):
         if object_name.lower().startswith("merge_"):
             continue
         source_kind = "bq" if object_name in source_bq else "dbt_model"
@@ -1365,7 +1376,7 @@ def main() -> int:
             },
         )
 
-        source_bq = build_source_bq_inventory(snapshot_dir)
+        source_bq, renamed_away_names = build_source_bq_inventory(snapshot_dir)
         source_dbt = build_source_dbt_inventory(snapshot_dir)
         source_dags = build_source_dag_inventory(snapshot_dir)
         source_files = collect_source_files(snapshot_dir)
@@ -1390,6 +1401,7 @@ def main() -> int:
                 source_dbt,
                 actual_bq,
                 args.gcp_project,
+                renamed_away_names,
             )
         else:
             actual_bq = {}
