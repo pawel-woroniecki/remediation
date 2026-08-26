@@ -173,6 +173,8 @@ _BQ_TYPE_ALIASES: dict[str, str] = {
     "BOOLEAN": "BOOL",
     # Numeric family
     "DECIMAL": "NUMERIC", "BIGDECIMAL": "BIGNUMERIC",
+    # STRUCT family — INFORMATION_SCHEMA returns "RECORD" for STRUCT columns
+    "STRUCT": "RECORD",
 }
 
 
@@ -182,8 +184,12 @@ def canonical_bq_data_type(dtype: str) -> str:
     INFORMATION_SCHEMA always returns canonical names (INT64, BOOL, …) while DDL
     files may use the accepted aliases (INTEGER, BOOLEAN, …).  Normalise both
     sides before comparing so aliases never produce false type_mismatch findings.
+
+    STRUCT<...> parameters are stripped before lookup so that a DDL type like
+    "STRUCT<topic STRING, partition INT64>" normalises to "RECORD" (the form
+    INFORMATION_SCHEMA returns), preventing false schema_mismatch findings.
     """
-    key = dtype.upper().strip()
+    key = dtype.split("<")[0].upper().strip()
     return _BQ_TYPE_ALIASES.get(key, key)
 
 
@@ -200,6 +206,7 @@ def canonical_object_type(value: str | None) -> str:
         "function": "function",
         "scalar_function": "function",
         "table_function": "function",
+        "external": "external",
     }
     return aliases.get(normalized, normalized)
 
@@ -376,6 +383,7 @@ def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
     patterns = [
         (r"create\s+(?:or\s+replace\s+)?materialized\s+view\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "materialized_view"),
         (r"create\s+(?:or\s+replace\s+)?view\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "view"),
+        (r"create\s+external\s+table\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "external"),
         (r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "table"),
         (r"create\s+(?:or\s+replace\s+)?procedure\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "procedure"),
         (r"create\s+(?:or\s+replace\s+)?function\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "function"),
@@ -974,6 +982,10 @@ def compare_bigquery(
 
     for object_name in sorted((expected_names - actual_names) - renamed_away_names):
         if object_name.lower().startswith("merge_"):
+            continue
+        # Tables renamed to a "deprecated" name are given an expiration date by convention.
+        # After BQ auto-drops them the DDL snapshot is intentionally stale — suppress.
+        if "deprecated" in object_name.lower():
             continue
         source_kind = "bq" if object_name in source_bq else "dbt_model"
         details = "Object exists in the selected source snapshot but not in the selected GCP dataset inventory."
