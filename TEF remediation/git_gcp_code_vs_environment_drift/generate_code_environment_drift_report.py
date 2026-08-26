@@ -383,10 +383,10 @@ def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
     patterns = [
         (r"create\s+(?:or\s+replace\s+)?materialized\s+view\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "materialized_view"),
         (r"create\s+(?:or\s+replace\s+)?view\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "view"),
-        (r"create\s+external\s+table\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "external"),
-        (r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "table"),
-        (r"create\s+(?:or\s+replace\s+)?procedure\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "procedure"),
-        (r"create\s+(?:or\s+replace\s+)?function\s+(?:if\s+not\s+exists\s+)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "function"),
+        (r"create\s+external\s+table\s+(?:if\s+not\s+exists\s*)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "external"),
+        (r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s*)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "table"),
+        (r"create\s+(?:or\s+replace\s+)?procedure\s+(?:if\s+not\s+exists\s*)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "procedure"),
+        (r"create\s+(?:or\s+replace\s+)?function\s+(?:if\s+not\s+exists\s*)?`?(?:(?:[\w\-]+)\.)?(?P<ds>[\w\-]+)\.(?P<obj>[\w\-]+)`?", "function"),
     ]
     seen: set[tuple[str | None, str]] = set()
     results: list[tuple[str | None, str, str]] = []
@@ -401,7 +401,7 @@ def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
 
 def extract_columns_from_create_table(sql: str) -> dict[str, str]:
     match = re.search(
-        r"create\s+(?:or\s+replace\s+)?table\s+`?(?:[\w\-]+\.)?[\w\-]+\.[\w\-]+`?\s*\((?P<body>.*?)\)\s*(?:options|partition|cluster|;)",
+        r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s*)?`?(?:[\w\-]+\.)?[\w\-]+\.[\w\-]+`?\s*\((?P<body>.*?)\)\s*(?:options|partition|cluster|;)",
         sql,
         flags=re.IGNORECASE | re.DOTALL,
     )
@@ -961,7 +961,7 @@ def compare_bigquery(
     expected_names = set(source_bq) | deployable_dbt_names
     actual_names = set(actual_bq)
 
-    for object_name in sorted(actual_names - expected_names):
+    for object_name in sorted((actual_names - expected_names) - renamed_away_names):
         if object_name.lower().startswith("merge_"):
             continue
         actual = actual_bq[object_name]
