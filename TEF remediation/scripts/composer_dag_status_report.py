@@ -228,80 +228,43 @@ def main() -> None:
         datetime.now(timezone.utc) - timedelta(days=args.run_window_days)
     ).strftime("%Y-%m-%d")
 
-    # ── 2. List DAGs — try REST API first, fall back to gcloud ────────────────
-    print("Connecting to Airflow REST API…")
-    rest_session = _make_authorized_session()
-
-    # Cheap probe to check whether the access token is accepted
-    try:
-        probe = rest_session.get(
-            f"{airflow_url}/api/v1/dags", params={"limit": 1}, timeout=10
-        )
-        use_rest_api = probe.status_code == 200
-    except Exception:
-        use_rest_api = False
-        probe = None
-
-    probe_status = probe.status_code if probe is not None else "error"
-
-    if use_rest_api:
-        print("  REST API accepted (OAuth 2.0 access token) — fast path active.")
-        print("Fetching DAG list via Airflow REST API…")
-        dag_pause_map = list_dags_http(rest_session, airflow_url)
-        if not dag_pause_map:
-            print("ERROR: REST API returned empty DAG list.")
-            sys.exit(1)
-    else:
-        print(f"  REST API returned HTTP {probe_status} — falling back to gcloud.")
-        print("Fetching DAG list via gcloud (≈30s)…")
-        dags_raw = run_airflow_cmd(
-            args.project, args.location, args.environment, ["dags", "list"]
-        )
-        if not dags_raw:
-            print("ERROR: could not retrieve DAG list. Check roles/composer.user on the project.")
-            sys.exit(1)
-        dag_pause_map: dict[str, bool] = {
-            d["dag_id"]: str(d.get("paused", False)).lower() == "true"
-            for d in dags_raw
-        }
-
+    # ── 2. List DAGs via gcloud (runs as Composer admin, sees all DAGs) ─────────
+    print("Fetching DAG list via gcloud (≈30s)…")
+    dags_raw = run_airflow_cmd(
+        args.project, args.location, args.environment, ["dags", "list"]
+    )
+    if not dags_raw:
+        print("ERROR: could not retrieve DAG list. Check roles/composer.user on the project.")
+        sys.exit(1)
+    dag_pause_map: dict[str, bool] = {
+        d["dag_id"]: str(d.get("paused", False)).lower() == "true"
+        for d in dags_raw
+    }
     print(f"  {len(dag_pause_map)} DAG(s) found\n")
     if args.dag_limit > 0:
         dag_pause_map = dict(list(dag_pause_map.items())[:args.dag_limit])
         print(f"  [--dag-limit] capped to {len(dag_pause_map)} DAG(s) for testing\n")
 
-    # ── 3. Fetch the latest run for each DAG (parallel) ───────────────────────
+    # ── 3. Fetch the latest run for each DAG via REST API (parallel) ──────────
+    print("Connecting to Airflow REST API for run queries…")
+    rest_session = _make_authorized_session()
     total_dags = len(dag_pause_map)
-    approach = "REST API" if use_rest_api else "gcloud"
     print(
-        f"Fetching latest run for {total_dags} DAG(s) using {args.workers} parallel workers ({approach})…"
+        f"Fetching latest run for {total_dags} DAG(s) using {args.workers} parallel workers (REST API)…"
         f"\n  Run window  : {start_date} → now ({args.run_window_days} days)"
     )
-    if not use_rest_api:
-        estimated_lo = total_dags // args.workers * 10 // 60
-        estimated_hi = total_dags // args.workers * 30 // 60
-        print(f"  Estimated time: {estimated_lo}–{estimated_hi} min (gcloud mode)")
 
     latest_run: dict[str, dict] = {}
     done = 0
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        if use_rest_api:
-            futures = {
-                pool.submit(
-                    get_latest_run_http,
-                    rest_session, airflow_url, dag_id, start_date
-                ): dag_id
-                for dag_id in dag_pause_map
-            }
-        else:
-            futures = {
-                pool.submit(
-                    get_latest_run_for_dag,
-                    args.project, args.location, args.environment, dag_id, start_date
-                ): dag_id
-                for dag_id in dag_pause_map
-            }
+        futures = {
+            pool.submit(
+                get_latest_run_http,
+                rest_session, airflow_url, dag_id, start_date
+            ): dag_id
+            for dag_id in dag_pause_map
+        }
 
         for future in as_completed(futures):
             dag_id, run = future.result()
