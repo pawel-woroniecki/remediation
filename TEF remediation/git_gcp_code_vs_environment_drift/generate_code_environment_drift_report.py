@@ -370,6 +370,13 @@ _ALTER_TABLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# DROP TABLE — used to exclude transient tables (created and dropped in the same file,
+# e.g. inside a stored-procedure body) from the persistent inventory.
+_DROP_TABLE_RE = re.compile(
+    r"\bdrop\s+table\s+(?:if\s+exists\s*)?`?(?:(?:[\w\-]+)`?\.`?)*(?P<obj>[\w\-]+)`?",
+    re.IGNORECASE,
+)
+
 
 def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
     """Return every CREATE DDL target found in sql as (dataset, object_name, object_type).
@@ -396,6 +403,12 @@ def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
             if (ds, obj) not in seen:
                 seen.add((ds, obj))
                 results.append((ds, obj, otype))
+    # Exclude objects that are also explicitly dropped in the same file.
+    # Tables created and dropped in one script are transient (e.g. inside a
+    # stored-procedure body) and should not appear as persistent inventory objects.
+    dropped_names = {m.group("obj") for m in _DROP_TABLE_RE.finditer(sql)}
+    if dropped_names:
+        results = [(ds, obj, otype) for ds, obj, otype in results if obj not in dropped_names]
     return results
 
 
