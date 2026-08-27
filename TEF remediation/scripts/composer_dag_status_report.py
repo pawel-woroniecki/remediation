@@ -30,7 +30,6 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
 
 import google.auth
 import google.auth.transport.requests
@@ -103,7 +102,6 @@ def get_latest_run_http(
     session,
     airflow_url: str,
     dag_id: str,
-    start_date: str,
 ) -> tuple[str, dict | None]:
     """Fetch the most recent DAG run for one DAG via the Airflow REST API."""
     try:
@@ -112,7 +110,6 @@ def get_latest_run_http(
             params={
                 "limit": 1,
                 "order_by": "-execution_date",
-                "start_date_gte": f"{start_date}T00:00:00Z",
             },
             timeout=30,
         )
@@ -211,8 +208,6 @@ def main() -> None:
     parser.add_argument("--output",      default=DEFAULT_OUTPUT)
     parser.add_argument("--workers",          type=int, default=20,
                         help="Parallel workers for per-DAG run queries (default: 20)")
-    parser.add_argument("--run-window-days",  type=int, default=90,
-                        help="Only look at runs in the last N days (default: 90)")
     parser.add_argument("--dag-limit",        type=int, default=0,
                         help="Cap number of DAGs queried (0 = all); use for testing")
     args = parser.parse_args()
@@ -224,10 +219,6 @@ def main() -> None:
     print(f"Environment: {args.environment}  ({args.location})")
     print(f"  Airflow UI : {airflow_url}\n")
 
-    start_date = (
-        datetime.now(timezone.utc) - timedelta(days=args.run_window_days)
-    ).strftime("%Y-%m-%d")
-
     # ── 2. List DAGs via gcloud (runs as Composer admin, sees all DAGs) ─────────
     print("Fetching DAG list via gcloud (≈30s)…")
     dags_raw = run_airflow_cmd(
@@ -237,7 +228,7 @@ def main() -> None:
         print("ERROR: could not retrieve DAG list. Check roles/composer.user on the project.")
         sys.exit(1)
     dag_pause_map: dict[str, bool] = {
-        d["dag_id"]: str(d.get("paused", False)).lower() == "true"
+        d["dag_id"]: bool(d.get("is_paused", d.get("paused", False)))
         for d in dags_raw
     }
     print(f"  {len(dag_pause_map)} DAG(s) found\n")
@@ -249,10 +240,7 @@ def main() -> None:
     print("Connecting to Airflow REST API for run queries…")
     rest_session = _make_authorized_session()
     total_dags = len(dag_pause_map)
-    print(
-        f"Fetching latest run for {total_dags} DAG(s) using {args.workers} parallel workers (REST API)…"
-        f"\n  Run window  : {start_date} → now ({args.run_window_days} days)"
-    )
+    print(f"Fetching latest run for {total_dags} DAG(s) using {args.workers} parallel workers (REST API)…")
 
     latest_run: dict[str, dict] = {}
     done = 0
@@ -261,7 +249,7 @@ def main() -> None:
         futures = {
             pool.submit(
                 get_latest_run_http,
-                rest_session, airflow_url, dag_id, start_date
+                rest_session, airflow_url, dag_id
             ): dag_id
             for dag_id in dag_pause_map
         }
