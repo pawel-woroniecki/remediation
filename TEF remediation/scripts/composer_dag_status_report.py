@@ -50,8 +50,27 @@ STATUS_EMOJI = {
 
 # ── REST API helpers ─────────────────────────────────────────────────────────
 
-def _make_authorized_session() -> google.auth.transport.requests.AuthorizedSession:
-    """Build an AuthorizedSession with cloud-platform scope (same auth as the Composer API)."""
+def _make_authorized_session():
+    """Build an HTTP session for Airflow REST API calls.
+
+    Prefers `gcloud auth print-access-token` (the interactive user's token) over
+    google.auth.default() to avoid GOOGLE_APPLICATION_CREDENTIALS overrides in
+    Cloud Shell that may resolve to a service account with restricted Airflow RBAC.
+    Falls back to google.auth.default() when gcloud is not available.
+    """
+    try:
+        result = subprocess.run(
+            ["gcloud", "auth", "print-access-token"],
+            capture_output=True, text=True, timeout=30,
+        )
+        token = result.stdout.strip()
+        if token and result.returncode == 0:
+            session = requests.Session()
+            session.headers.update({"Authorization": f"Bearer {token}"})
+            return session
+    except Exception:
+        pass
+    # Fallback: google.auth ADC (works outside Cloud Shell / in Cloud Run jobs)
     credentials, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
