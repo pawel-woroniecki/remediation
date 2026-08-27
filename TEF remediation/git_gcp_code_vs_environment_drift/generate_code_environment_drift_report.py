@@ -1081,15 +1081,21 @@ def compare_bigquery(
                 # a FM_DTM_1h_v1.sql supersession), also check each fragment individually.
                 # If any single fragment matches GCP the latest deployed version is already
                 # in source — the joined sql_fragments just produced a non-matching string.
-                fragment_match = source.multi_statement and any(
+                frag_normalized = [
                     normalize_sql(
                         strip_create_as_header(
                             strip_redundant_project_qualifiers(frag, project_id)
                         )
-                    ) == actual_sql
+                    )
                     for frag in source.sql_fragments
+                ]
+                fragment_match = source.multi_statement and any(
+                    fn == actual_sql for fn in frag_normalized
                 )
                 if not fragment_match:
+                    debug_frags = " | ".join(
+                        repr(fn[:120]) for fn in frag_normalized
+                    )
                     findings.append(
                         {
                             "area": "bigquery",
@@ -1099,7 +1105,10 @@ def compare_bigquery(
                             "severity": "high",
                             "source_technology": source.source_kind,
                             "details": (
-                                "Source view definition and selected GCP view definition differ after normalization."
+                                f"Source view definition and selected GCP view definition differ after normalization. "
+                                f"[DEBUG source_sql={repr(source_sql[:120])}] "
+                                f"[DEBUG actual_sql={repr(actual_sql[:120])}] "
+                                f"[DEBUG frags={debug_frags}]"
                             ),
                         }
                     )
