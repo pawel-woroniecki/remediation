@@ -85,7 +85,7 @@ def list_dags_http(session, airflow_url: str) -> dict[str, bool]:
     while True:
         resp = session.get(
             f"{airflow_url}/api/v1/dags",
-            params={"limit": limit, "offset": offset},
+            params={"limit": limit, "offset": offset, "only_active": "false"},
             timeout=30,
         )
         resp.raise_for_status()
