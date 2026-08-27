@@ -5,8 +5,9 @@ One-off report: latest DAG run status for every DAG in a Cloud Composer environm
 Outputs a CSV file and a terminal summary.
 Each row includes a direct Airflow UI link so the reader can click through to the run.
 
-Uses `gcloud composer environments run` to execute Airflow CLI commands inside
-the environment — no IAP authentication required.
+By default uses the Airflow stable REST API (IAP-authenticated) — ~20–60 s for
+1000+ DAGs.  Pass --use-gcloud to fall back to the original gcloud-subprocess
+approach (~15 s per DAG, suitable for testing with a small --dag-limit).
 
 Usage (from Cloud Shell, authenticated as a project member with roles/composer.user):
   python composer_dag_status_report.py
@@ -16,7 +17,8 @@ Override defaults:
       --project     tefde-gcp-fastoss-prod-gke \
       --location    europe-west3 \
       --environment fastoss-prod-composer-3 \
-      --output      dag_report.csv
+      --output      dag_report.csv \
+      --workers     20
 """
 import argparse
 import csv
@@ -26,6 +28,13 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlparse
+
+import google.auth
+import google.auth.transport.requests
+import requests
+from google.auth.transport.requests import Request as GRequest
+from google.oauth2.id_token import fetch_id_token
 
 DEFAULT_PROJECT = "tefde-gcp-fastoss-prod-gke"
 DEFAULT_OUTPUT  = "dag_status_report.csv"
@@ -39,11 +48,86 @@ STATUS_EMOJI = {
 }
 
 
+# ── REST API helpers ─────────────────────────────────────────────────────────
+
+def _get_iap_client_id(airflow_url: str) -> str:
+    """Discover the IAP OAuth client_id from the Airflow web server's 302 redirect."""
+    resp = requests.get(airflow_url, allow_redirects=False, timeout=10)
+    location = resp.headers.get("location", "")
+    params = parse_qs(urlparse(location).query)
+    client_id = (params.get("client_id") or [""])[0]
+    if not client_id:
+        raise RuntimeError(
+            f"Could not discover IAP client_id from {airflow_url}.\n"
+            "Ensure the Airflow web server is IAP-protected and reachable, or use --use-gcloud."
+        )
+    return client_id
+
+
+def _make_iap_session(client_id: str) -> requests.Session:
+    """Return a requests.Session carrying a valid IAP OIDC Bearer token."""
+    token = fetch_id_token(GRequest(), audience=client_id)
+    session = requests.Session()
+    session.headers.update({"Authorization": f"Bearer {token}"})
+    return session
+
+
+def list_dags_http(session: requests.Session, airflow_url: str) -> dict[str, bool]:
+    """Fetch all DAGs via Airflow REST API.  Returns {dag_id: is_paused}."""
+    dag_pause_map: dict[str, bool] = {}
+    offset = 0
+    limit = 200
+    while True:
+        resp = session.get(
+            f"{airflow_url}/api/v1/dags",
+            params={"limit": limit, "offset": offset},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        for dag in data.get("dags", []):
+            dag_pause_map[dag["dag_id"]] = bool(dag.get("is_paused", False))
+        total = data.get("total_entries", 0)
+        offset += limit
+        if offset >= total:
+            break
+    return dag_pause_map
+
+
+def get_latest_run_http(
+    session: requests.Session,
+    airflow_url: str,
+    dag_id: str,
+    start_date: str,
+) -> tuple[str, dict | None]:
+    """Fetch the most recent DAG run for one DAG via the Airflow REST API."""
+    try:
+        resp = session.get(
+            f"{airflow_url}/api/v1/dags/{dag_id}/dagRuns",
+            params={
+                "limit": 1,
+                "order_by": "-execution_date",
+                "start_date_gte": f"{start_date}T00:00:00Z",
+            },
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return dag_id, None
+        runs = resp.json().get("dag_runs", [])
+        if not runs:
+            return dag_id, None
+        run = runs[0]
+        # Normalise REST API field names to match the gcloud CLI schema used downstream
+        run["run_id"] = run.pop("dag_run_id", run.get("run_id", ""))
+        return dag_id, run
+    except Exception:
+        return dag_id, None
+
+
+# ── gcloud fallback helpers (original approach) ───────────────────────────────
+
 def get_composer_environment(project: str, location: str, environment: str) -> dict:
     """Fetch a single Composer environment via REST API (no IAP needed)."""
-    import google.auth
-    import google.auth.transport.requests
-
     credentials, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
@@ -101,19 +185,15 @@ def get_latest_run_for_dag(
     dag_id: str,
     start_date: str,
 ) -> tuple[str, dict | None]:
-    """Fetch the most recent DAG run for a single DAG. Returns (dag_id, run_dict or None).
-
-    start_date (YYYY-MM-DD) limits the query window so high-frequency DAGs
-    (e.g. airflow_monitoring running every minute) don't return millions of rows
-    and time out.
-    """
+    """Fetch the most recent DAG run for a single DAG via gcloud (fallback)."""
     runs = run_airflow_cmd(
         project, location, env_name,
         ["dags", "list-runs"], ["--dag-id", dag_id, "--start-date", start_date]
     )
-    # list-runs returns runs ordered execution_date desc; first entry is the latest
     return dag_id, (runs[0] if runs else None)
 
+
+# ── main ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
@@ -124,63 +204,88 @@ def main() -> None:
     parser.add_argument("--environment", default="fastoss-prod-composer-3",
                         help="Composer environment name")
     parser.add_argument("--output",      default=DEFAULT_OUTPUT)
-    parser.add_argument("--workers",          type=int, default=3,
-                        help="Parallel workers for per-DAG run queries (default: 3)")
+    parser.add_argument("--workers",          type=int, default=20,
+                        help="Parallel workers for per-DAG run queries (default: 20)")
     parser.add_argument("--run-window-days",  type=int, default=90,
                         help="Only look at runs in the last N days (default: 90)")
     parser.add_argument("--dag-limit",        type=int, default=0,
                         help="Cap number of DAGs queried (0 = all); use for testing")
+    parser.add_argument("--use-gcloud",       action="store_true",
+                        help="Fall back to gcloud-subprocess approach (slow; for debugging)")
     args = parser.parse_args()
 
-    # ── 1. Fetch environment metadata for airflowUri and console link ──────────
+    # ── 1. Fetch environment metadata for airflowUri ──────────────────────────
+    print(f"Fetching Composer environment metadata…")
     env         = get_composer_environment(args.project, args.location, args.environment)
     airflow_url = env["config"]["airflowUri"].rstrip("/")
     print(f"Environment: {args.environment}  ({args.location})")
     print(f"  Airflow UI : {airflow_url}\n")
 
-    # ── 2. List all DAGs (≈30s) ────────────────────────────────────────────────
-    print("Fetching DAG list (≈30s)…")
-    dags_raw = run_airflow_cmd(
-        args.project, args.location, args.environment, ["dags", "list"]
-    )
-    if not dags_raw:
-        print("ERROR: could not retrieve DAG list. Check roles/composer.user on the project.")
-        sys.exit(1)
-    # Airflow 2 JSON uses "paused" (bool); guard against string "True"/"False"
-    dag_pause_map: dict[str, bool] = {
-        d["dag_id"]: str(d.get("paused", False)).lower() == "true"
-        for d in dags_raw
-    }
+    start_date = (
+        datetime.now(timezone.utc) - timedelta(days=args.run_window_days)
+    ).strftime("%Y-%m-%d")
+
+    # ── 2. List DAGs ──────────────────────────────────────────────────────────
+    if args.use_gcloud:
+        print("Fetching DAG list via gcloud (≈30s)…")
+        dags_raw = run_airflow_cmd(
+            args.project, args.location, args.environment, ["dags", "list"]
+        )
+        if not dags_raw:
+            print("ERROR: could not retrieve DAG list. Check roles/composer.user on the project.")
+            sys.exit(1)
+        dag_pause_map: dict[str, bool] = {
+            d["dag_id"]: str(d.get("paused", False)).lower() == "true"
+            for d in dags_raw
+        }
+    else:
+        print("Discovering IAP client_id…")
+        client_id = _get_iap_client_id(airflow_url)
+        iap_session = _make_iap_session(client_id)
+        print("Fetching DAG list via Airflow REST API…")
+        dag_pause_map = list_dags_http(iap_session, airflow_url)
+        if not dag_pause_map:
+            print("ERROR: could not retrieve DAG list.")
+            sys.exit(1)
+
     print(f"  {len(dag_pause_map)} DAG(s) found\n")
     if args.dag_limit > 0:
         dag_pause_map = dict(list(dag_pause_map.items())[:args.dag_limit])
         print(f"  [--dag-limit] capped to {len(dag_pause_map)} DAG(s) for testing\n")
 
-    # ── 3. Fetch the latest run for each DAG (parallel per-DAG calls) ────────────
-    # airflow dags list-runs without --dag-id returns [] in Airflow 2.10;
-    # per-DAG calls with --dag-id are required. We parallelise to stay fast.
-    # --start-date caps the query window so high-frequency DAGs don't time out.
-    start_date = (
-        datetime.now(timezone.utc) - timedelta(days=args.run_window_days)
-    ).strftime("%Y-%m-%d")
+    # ── 3. Fetch the latest run for each DAG (parallel) ───────────────────────
     total_dags = len(dag_pause_map)
+    approach = "gcloud (slow)" if args.use_gcloud else "Airflow REST API"
     print(
-        f"Fetching latest run for {total_dags} DAG(s) using {args.workers} parallel workers…"
+        f"Fetching latest run for {total_dags} DAG(s) using {args.workers} parallel workers ({approach})…"
         f"\n  Run window  : {start_date} → now ({args.run_window_days} days)"
-        f"\n  Estimated time: {total_dags // args.workers * 10 // 60}–"
-        f"{total_dags // args.workers * 30 // 60} min depending on cluster latency."
     )
+    if args.use_gcloud:
+        estimated_lo = total_dags // args.workers * 10 // 60
+        estimated_hi = total_dags // args.workers * 30 // 60
+        print(f"  Estimated time: {estimated_lo}–{estimated_hi} min (gcloud mode)")
+
     latest_run: dict[str, dict] = {}
     done = 0
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {
-            pool.submit(
-                get_latest_run_for_dag,
-                args.project, args.location, args.environment, dag_id, start_date
-            ): dag_id
-            for dag_id in dag_pause_map
-        }
+        if args.use_gcloud:
+            futures = {
+                pool.submit(
+                    get_latest_run_for_dag,
+                    args.project, args.location, args.environment, dag_id, start_date
+                ): dag_id
+                for dag_id in dag_pause_map
+            }
+        else:
+            futures = {
+                pool.submit(
+                    get_latest_run_http,
+                    iap_session, airflow_url, dag_id, start_date
+                ): dag_id
+                for dag_id in dag_pause_map
+            }
+
         for future in as_completed(futures):
             dag_id, run = future.result()
             if run:
