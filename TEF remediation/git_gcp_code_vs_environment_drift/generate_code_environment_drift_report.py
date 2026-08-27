@@ -1077,19 +1077,32 @@ def compare_bigquery(
                 )
             )
             if actual_sql and source_sql and source_sql != actual_sql:
-                findings.append(
-                    {
-                        "area": "bigquery",
-                        "object_name": object_name,
-                        "dataset": actual.get("dataset"),
-                        "status": "definition_mismatch",
-                        "severity": "high",
-                        "source_technology": source.source_kind,
-                        "details": (
-                            "Source view definition and selected GCP view definition differ after normalization."
-                        ),
-                    }
+                # For objects defined across multiple source files (e.g. a base file and
+                # a FM_DTM_1h_v1.sql supersession), also check each fragment individually.
+                # If any single fragment matches GCP the latest deployed version is already
+                # in source — the joined sql_fragments just produced a non-matching string.
+                fragment_match = source.multi_statement and any(
+                    normalize_sql(
+                        strip_create_as_header(
+                            strip_redundant_project_qualifiers(frag, project_id)
+                        )
+                    ) == actual_sql
+                    for frag in source.sql_fragments
                 )
+                if not fragment_match:
+                    findings.append(
+                        {
+                            "area": "bigquery",
+                            "object_name": object_name,
+                            "dataset": actual.get("dataset"),
+                            "status": "definition_mismatch",
+                            "severity": "high",
+                            "source_technology": source.source_kind,
+                            "details": (
+                                "Source view definition and selected GCP view definition differ after normalization."
+                            ),
+                        }
+                    )
 
         if source.object_type == "table" and source.is_ctas:
             # GCP INFORMATION_SCHEMA.TABLES.ddl includes the full CTAS DDL with header.
