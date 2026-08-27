@@ -228,7 +228,7 @@ def main() -> None:
         print("ERROR: could not retrieve DAG list. Check roles/composer.user on the project.")
         sys.exit(1)
     dag_pause_map: dict[str, bool] = {
-        d["dag_id"]: bool(d.get("is_paused", d.get("paused", False)))
+        d["dag_id"]: str(d.get("is_paused", d.get("paused", False))).lower() == "true"
         for d in dags_raw
     }
     print(f"  {len(dag_pause_map)} DAG(s) found\n")
