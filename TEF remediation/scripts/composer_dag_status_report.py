@@ -51,17 +51,60 @@ STATUS_EMOJI = {
 # ── REST API helpers ─────────────────────────────────────────────────────────
 
 def _get_iap_client_id(airflow_url: str) -> str:
-    """Discover the IAP OAuth client_id from the Airflow web server's 302 redirect."""
-    resp = requests.get(airflow_url, allow_redirects=False, timeout=10)
-    location = resp.headers.get("location", "")
-    params = parse_qs(urlparse(location).query)
-    client_id = (params.get("client_id") or [""])[0]
-    if not client_id:
-        raise RuntimeError(
-            f"Could not discover IAP client_id from {airflow_url}.\n"
-            "Ensure the Airflow web server is IAP-protected and reachable, or use --use-gcloud."
-        )
-    return client_id
+    """Discover the IAP OAuth client_id for the Airflow web server.
+
+    Tries three strategies in order:
+    1. Unauthenticated GET → 302 Location header contains client_id= param.
+    2. Same for the REST API endpoint (sometimes triggers a different redirect).
+    3. Follow redirects to the Google sign-in page and parse client_id from the
+       HTML/URL (IAP embeds it as a JSON field or query param in the page).
+
+    If all three fail, raise with instructions to use --iap-client-id.
+    """
+    _CLIENT_ID_RE = re.compile(
+        r'["\&?]client_id[="\s:]+([A-Za-z0-9_\-]+\.apps\.googleusercontent\.com)'
+    )
+
+    probe_urls = [airflow_url, f"{airflow_url}/api/v1/dags"]
+
+    # Strategy 1 & 2: check Location header of a no-redirect response
+    for url in probe_urls:
+        try:
+            resp = requests.get(url, allow_redirects=False, timeout=10)
+            location = resp.headers.get("location", "")
+            if location:
+                params = parse_qs(urlparse(location).query)
+                client_id = (params.get("client_id") or [""])[0]
+                if client_id:
+                    return client_id
+                # client_id might be in the location URL itself as a fragment
+                m = _CLIENT_ID_RE.search(location)
+                if m:
+                    return m.group(1)
+        except Exception:
+            pass
+
+    # Strategy 3: follow redirects to the Google sign-in page and parse HTML
+    try:
+        resp = requests.get(airflow_url, allow_redirects=True, timeout=15)
+        # Check final URL
+        m = _CLIENT_ID_RE.search(resp.url)
+        if m:
+            return m.group(1)
+        # Check HTML body (IAP embeds client_id as a JS/JSON value)
+        m = _CLIENT_ID_RE.search(resp.text[:8192])
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+
+    raise RuntimeError(
+        f"Could not auto-discover IAP client_id from {airflow_url}.\n"
+        "Find it in the GCP Console: Security → Identity-Aware Proxy → locate the\n"
+        "Composer web server entry → OAuth client ID column, then pass it with:\n"
+        "  --iap-client-id 123456789-abc...apps.googleusercontent.com\n"
+        "Or use --use-gcloud to fall back to the original gcloud approach."
+    )
 
 
 def _make_iap_session(client_id: str) -> requests.Session:
@@ -210,6 +253,9 @@ def main() -> None:
                         help="Only look at runs in the last N days (default: 90)")
     parser.add_argument("--dag-limit",        type=int, default=0,
                         help="Cap number of DAGs queried (0 = all); use for testing")
+    parser.add_argument("--iap-client-id",    default="",
+                        help="IAP OAuth client_id (e.g. 123…apps.googleusercontent.com). "
+                             "Skip auto-discovery when provided.")
     parser.add_argument("--use-gcloud",       action="store_true",
                         help="Fall back to gcloud-subprocess approach (slow; for debugging)")
     args = parser.parse_args()
@@ -239,8 +285,13 @@ def main() -> None:
             for d in dags_raw
         }
     else:
-        print("Discovering IAP client_id…")
-        client_id = _get_iap_client_id(airflow_url)
+        if args.iap_client_id:
+            client_id = args.iap_client_id
+            print(f"Using provided IAP client_id: {client_id}")
+        else:
+            print("Discovering IAP client_id…")
+            client_id = _get_iap_client_id(airflow_url)
+            print(f"  Found: {client_id}")
         iap_session = _make_iap_session(client_id)
         print("Fetching DAG list via Airflow REST API…")
         dag_pause_map = list_dags_http(iap_session, airflow_url)
