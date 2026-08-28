@@ -377,6 +377,15 @@ _DROP_TABLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches a bare SELECT * FROM <table> view body (no WHERE/JOIN/GROUP BY etc.).
+# GCP sometimes stores the expanded column list for a view defined with SELECT *,
+# making the string comparison fail even though the definitions are semantically
+# equivalent. We suppress definition_mismatch for this pattern.
+_SELECT_STAR_VIEW_RE = re.compile(
+    r"^select\s+\*\s+from\s+[\w.\-`]+(\s+(?:as\s+)?[\w`]+)?\s*$",
+    re.IGNORECASE,
+)
+
 
 def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
     """Return every CREATE DDL target found in sql as (dataset, object_name, object_type).
@@ -1092,10 +1101,11 @@ def compare_bigquery(
                 fragment_match = source.multi_statement and any(
                     fn == actual_sql for fn in frag_normalized
                 )
-                if not fragment_match:
-                    debug_frags = " | ".join(
-                        repr(fn[:120]) for fn in frag_normalized
-                    )
+                # Suppress when source is a bare SELECT * FROM <table> — GCP may store
+                # the expanded column list, making string comparison fail even though
+                # the definitions are semantically equivalent.
+                select_star_match = bool(_SELECT_STAR_VIEW_RE.match(source_sql.strip()))
+                if not fragment_match and not select_star_match:
                     findings.append(
                         {
                             "area": "bigquery",
@@ -1105,10 +1115,7 @@ def compare_bigquery(
                             "severity": "high",
                             "source_technology": source.source_kind,
                             "details": (
-                                f"Source view definition and selected GCP view definition differ after normalization. "
-                                f"[DEBUG source_sql={repr(source_sql[:120])}] "
-                                f"[DEBUG actual_sql={repr(actual_sql[:120])}] "
-                                f"[DEBUG frags={debug_frags}]"
+                                "Source view definition and selected GCP view definition differ after normalization."
                             ),
                         }
                     )
