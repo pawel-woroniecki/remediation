@@ -747,7 +747,7 @@ def fetch_bigquery_inventory(
     results: dict[tuple[str, str], list[dict[str, Any]]] = {}
     not_found_datasets: set[str] = set()
 
-    with ThreadPoolExecutor(max_workers=min(len(tasks), 16)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(tasks), 4)) as pool:
         future_map = {pool.submit(_q, sql): (ds, kind) for ds, kind, sql in tasks}
         for future in as_completed(future_map):
             ds, kind = future_map[future]
