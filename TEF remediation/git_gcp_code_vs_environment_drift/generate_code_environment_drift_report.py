@@ -733,9 +733,22 @@ def fetch_bigquery_inventory(
     def _q(sql: str) -> list[dict[str, Any]]:
         return [dict(row) for row in bq.query(sql).result()]
 
+    def _q_with_retry(sql: str, max_attempts: int = 4) -> list[dict[str, Any]]:
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return _q(sql)
+            except google.api_core.exceptions.BadRequest as exc:
+                if "resourcesExceeded" not in str(exc) or attempt == max_attempts:
+                    raise
+                delay = 30 * (2 ** (attempt - 1))  # 30s, 60s, 120s
+                log("WARNING", "BigQuery resourcesExceeded — retrying after delay",
+                    attempt=attempt, max_attempts=max_attempts, delay_s=delay)
+                time.sleep(delay)
+        return []  # unreachable
+
     # Use region-level INFORMATION_SCHEMA so all datasets are covered by 4 queries
-    # total instead of 4×N per-dataset queries. This avoids BigQuery shuffle memory
-    # exhaustion when many datasets are queried simultaneously on on-demand slots.
+    # total instead of 4×N per-dataset queries. Queries run sequentially to avoid
+    # any concurrent contribution to the project's shared shuffle memory quota.
     ds_filter = ", ".join(f"'{ds}'" for ds in datasets)
     r = f"`{project_id}`.`region-europe-west3`.INFORMATION_SCHEMA"
     region_queries = {
@@ -746,19 +759,16 @@ def fetch_bigquery_inventory(
     }
 
     kind_rows: dict[str, list[dict[str, Any]]] = {}
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        future_map = {pool.submit(_q, sql): kind for kind, sql in region_queries.items()}
-        for future in as_completed(future_map):
-            kind = future_map[future]
-            try:
-                kind_rows[kind] = future.result()
-            except (Forbidden, PermissionDenied) as exc:
-                raise RuntimeError(
-                    f"Permission denied reading {project_id} INFORMATION_SCHEMA. "
-                    f"Grant roles/bigquery.metadataViewer and roles/bigquery.jobUser "
-                    f"to the runner service account on project {project_id}. "
-                    f"Original error: {exc}"
-                ) from exc
+    for kind, sql in region_queries.items():
+        try:
+            kind_rows[kind] = _q_with_retry(sql)
+        except (Forbidden, PermissionDenied) as exc:
+            raise RuntimeError(
+                f"Permission denied reading {project_id} INFORMATION_SCHEMA. "
+                f"Grant roles/bigquery.metadataViewer and roles/bigquery.jobUser "
+                f"to the runner service account on project {project_id}. "
+                f"Original error: {exc}"
+            ) from exc
 
     # Group rows by dataset so the downstream loop can work dataset-by-dataset.
     by_ds: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
