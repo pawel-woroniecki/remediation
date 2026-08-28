@@ -733,36 +733,41 @@ def fetch_bigquery_inventory(
     def _q(sql: str) -> list[dict[str, Any]]:
         return [dict(row) for row in bq.query(sql).result()]
 
-    # Build all (dataset × query-kind) tasks upfront so all fire in parallel.
-    tasks: list[tuple[str, str, str]] = []
-    for dataset in datasets:
-        p = f"`{project_id}`.{dataset}.INFORMATION_SCHEMA"
-        tasks += [
-            (dataset, "tables",   f"SELECT table_name, table_type, ddl FROM {p}.TABLES"),
-            (dataset, "columns",  f"SELECT table_name, column_name, data_type FROM {p}.COLUMNS"),
-            (dataset, "routines", f"SELECT routine_name, routine_type, routine_definition FROM {p}.ROUTINES"),
-            (dataset, "views",    f"SELECT table_name, view_definition FROM {p}.VIEWS"),
-        ]
+    # Use region-level INFORMATION_SCHEMA so all datasets are covered by 4 queries
+    # total instead of 4×N per-dataset queries. This avoids BigQuery shuffle memory
+    # exhaustion when many datasets are queried simultaneously on on-demand slots.
+    ds_filter = ", ".join(f"'{ds}'" for ds in datasets)
+    r = f"`{project_id}`.`region-europe-west3`.INFORMATION_SCHEMA"
+    region_queries = {
+        "tables":   f"SELECT table_schema AS ds, table_name, table_type, ddl FROM {r}.TABLES WHERE table_schema IN ({ds_filter})",
+        "columns":  f"SELECT table_schema AS ds, table_name, column_name, data_type FROM {r}.COLUMNS WHERE table_schema IN ({ds_filter})",
+        "routines": f"SELECT routine_schema AS ds, routine_name, routine_type, routine_definition FROM {r}.ROUTINES WHERE routine_schema IN ({ds_filter})",
+        "views":    f"SELECT table_schema AS ds, table_name, view_definition FROM {r}.VIEWS WHERE table_schema IN ({ds_filter})",
+    }
 
-    results: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    not_found_datasets: set[str] = set()
-
-    with ThreadPoolExecutor(max_workers=min(len(tasks), 4)) as pool:
-        future_map = {pool.submit(_q, sql): (ds, kind) for ds, kind, sql in tasks}
+    kind_rows: dict[str, list[dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        future_map = {pool.submit(_q, sql): kind for kind, sql in region_queries.items()}
         for future in as_completed(future_map):
-            ds, kind = future_map[future]
+            kind = future_map[future]
             try:
-                results[(ds, kind)] = future.result()
-            except NotFound:
-                not_found_datasets.add(ds)
+                kind_rows[kind] = future.result()
             except (Forbidden, PermissionDenied) as exc:
                 raise RuntimeError(
-                    f"Permission denied reading {project_id}:{ds} INFORMATION_SCHEMA. "
+                    f"Permission denied reading {project_id} INFORMATION_SCHEMA. "
                     f"Grant roles/bigquery.metadataViewer and roles/bigquery.jobUser "
                     f"to the runner service account on project {project_id}. "
                     f"Original error: {exc}"
                 ) from exc
 
+    # Group rows by dataset so the downstream loop can work dataset-by-dataset.
+    by_ds: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
+    for kind, rows in kind_rows.items():
+        for row in rows:
+            by_ds[row["ds"]][kind].append(row)
+
+    # Datasets with no rows in TABLES are absent from BigQuery (not found or empty).
+    not_found_datasets = set(datasets) - set(by_ds.keys())
     for ds in not_found_datasets:
         log("WARNING", "Dataset not found in BigQuery — treating as absent (drift)",
             project=project_id, dataset=ds)
@@ -770,10 +775,11 @@ def fetch_bigquery_inventory(
     for dataset in datasets:
         if dataset in not_found_datasets:
             continue
-        table_rows   = results.get((dataset, "tables"),   [])
-        column_rows  = results.get((dataset, "columns"),  [])
-        routine_rows = results.get((dataset, "routines"), [])
-        view_rows    = results.get((dataset, "views"),    [])
+        ds_data      = by_ds[dataset]
+        table_rows   = ds_data.get("tables",   [])
+        column_rows  = ds_data.get("columns",  [])
+        routine_rows = ds_data.get("routines", [])
+        view_rows    = ds_data.get("views",    [])
 
         for row in table_rows:
             inventory[row["table_name"]] = {
