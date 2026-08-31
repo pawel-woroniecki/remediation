@@ -421,23 +421,27 @@ def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
     return results
 
 
+_CREATE_TABLE_BODY_RE = re.compile(
+    r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s*)?`?(?:[\w\-]+\.)?[\w\-]+\.[\w\-]+`?\s*\((?P<body>.*?)\)\s*(?:options|partition|cluster|;)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 def extract_columns_from_create_table(sql: str) -> dict[str, str]:
-    match = re.search(
-        r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s*)?`?(?:[\w\-]+\.)?[\w\-]+\.[\w\-]+`?\s*\((?P<body>.*?)\)\s*(?:options|partition|cluster|;)",
-        sql,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    if not match:
-        return {}
-    body = match.group("body")
+    # Use finditer so that files with multiple CREATE TABLE statements (e.g. a
+    # first statement with the old schema followed by a CREATE TABLE IF NOT EXISTS
+    # with the updated schema) are handled correctly — later definitions override
+    # earlier ones for the same column name.
     columns: dict[str, str] = {}
-    for raw_line in body.splitlines():
-        line = raw_line.strip().rstrip(",")
-        if not line or line.startswith("--"):
-            continue
-        column_match = re.match(r"`?(?P<name>[\w\-]+)`?\s+(?P<dtype>[A-Z0-9_<>,]+)", line, flags=re.IGNORECASE)
-        if column_match:
-            columns[column_match.group("name")] = column_match.group("dtype").upper()
+    for match in _CREATE_TABLE_BODY_RE.finditer(sql):
+        body = match.group("body")
+        for raw_line in body.splitlines():
+            line = raw_line.strip().rstrip(",")
+            if not line or line.startswith("--"):
+                continue
+            column_match = re.match(r"`?(?P<name>[\w\-]+)`?\s+(?P<dtype>[A-Z0-9_<>,]+)", line, flags=re.IGNORECASE)
+            if column_match:
+                columns[column_match.group("name")] = column_match.group("dtype").upper()
     return columns
 
 
