@@ -499,7 +499,10 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
     if not bq_root.exists():
         return inventory, set()
 
-    for sql_file in sorted(bq_root.rglob("*.sql"), key=_sql_version_key):
+    for sql_file in sorted(
+        (f for f in bq_root.rglob("*") if f.suffix.lower() == ".sql"),
+        key=_sql_version_key,
+    ):
         # Skip temporary processing scripts (tmp_*) — they create and drop objects
         # within a single run and never leave a permanent object in GCP.
         if sql_file.stem.lower().startswith("tmp_"):
