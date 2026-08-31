@@ -794,7 +794,8 @@ def fetch_bigquery_inventory(
         view_rows    = ds_data.get("views",    [])
 
         for row in table_rows:
-            inventory[row["table_name"]] = {
+            key = f"{dataset}.{row['table_name']}"
+            inventory[key] = {
                 "object_name": row["table_name"],
                 "dataset": dataset,
                 "object_type": str(row.get("table_type", "unknown")).lower().replace(" ", "_"),
@@ -805,8 +806,9 @@ def fetch_bigquery_inventory(
 
         for row in column_rows:
             table_name = row["table_name"]
+            key = f"{dataset}.{table_name}"
             inventory.setdefault(
-                table_name,
+                key,
                 {
                     "object_name": table_name,
                     "dataset": dataset,
@@ -816,12 +818,13 @@ def fetch_bigquery_inventory(
                     "ddl": None,
                 },
             )
-            inventory[table_name]["columns"][row["column_name"]] = row.get("data_type", "")
+            inventory[key]["columns"][row["column_name"]] = row.get("data_type", "")
 
         for row in view_rows:
             table_name = row["table_name"]
+            key = f"{dataset}.{table_name}"
             inventory.setdefault(
-                table_name,
+                key,
                 {
                     "object_name": table_name,
                     "dataset": dataset,
@@ -831,10 +834,11 @@ def fetch_bigquery_inventory(
                     "ddl": None,
                 },
             )
-            inventory[table_name]["view_query"] = row.get("view_definition")
+            inventory[key]["view_query"] = row.get("view_definition")
 
         for row in routine_rows:
-            inventory[row["routine_name"]] = {
+            key = f"{dataset}.{row['routine_name']}"
+            inventory[key] = {
                 "object_name": row["routine_name"],
                 "dataset": dataset,
                 "object_type": str(row.get("routine_type", "routine")).lower(),
@@ -983,6 +987,17 @@ def compare_bigquery(
     """Compare source-side BQ/dbt expectations with actual BigQuery objects in the selected target project."""
     renamed_away_names = renamed_away_names or set()
     findings: list[dict[str, Any]] = []
+
+    # actual_bq is keyed by "dataset.table_name" to prevent cross-dataset collisions
+    # when multiple datasets share the same table name.  Build unqualified-name helpers
+    # for set operations and a name→[entry, …] index for single-entry fallback.
+    actual_names: set[str] = set()
+    actual_bq_by_name: dict[str, list[dict]] = defaultdict(list)
+    for _qk, _entry in actual_bq.items():
+        _uname = _qk.split(".", 1)[1] if "." in _qk else _qk
+        actual_names.add(_uname)
+        actual_bq_by_name[_uname].append(_entry)
+
     deployable_dbt_names = {
         name for name, model in source_dbt.items()
         if model.get("materialized") != "ephemeral"
@@ -995,16 +1010,15 @@ def compare_bigquery(
         # at runtime (seen with merge_mw_equipment, merge_mw_links).
         and not (
             name.lower().startswith("merge_")
-            and name not in actual_bq
+            and name not in actual_names
         )
     }
     expected_names = set(source_bq) | deployable_dbt_names
-    actual_names = set(actual_bq)
 
     for object_name in sorted((actual_names - expected_names) - renamed_away_names):
         if object_name.lower().startswith("merge_"):
             continue
-        actual = actual_bq[object_name]
+        actual = actual_bq_by_name[object_name][0]
         findings.append(
             {
                 "area": "bigquery",
@@ -1043,7 +1057,11 @@ def compare_bigquery(
 
     for object_name in sorted(set(source_bq) & actual_names):
         source = source_bq[object_name]
-        actual = actual_bq[object_name]
+        # Prefer the dataset the source file declares; fall back to first match.
+        if source.dataset:
+            actual = actual_bq.get(f"{source.dataset}.{object_name}") or actual_bq_by_name[object_name][0]
+        else:
+            actual = actual_bq_by_name[object_name][0]
         source_type = canonical_object_type(source.object_type)
         actual_type = canonical_object_type(str(actual.get("object_type", "")))
         if source_type not in {"unknown", "", actual_type}:
