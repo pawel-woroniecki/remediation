@@ -4,9 +4,10 @@ Reorganize gcloud bulk-export Terraform files into a folder hierarchy that
 mirrors GitLab repositories.
 
 Each GitLab repo in fastoss_b/ndl_core declares BQ_DATASET_NAMES in its
-.gitlab-ci.yml.  This script reads those declarations via the GitLab API
-(token fetched from GCP Secret Manager — no manual token handling needed),
-then walks the local tf_export_* directories and copies each .tf file into:
+.gitlab-ci.yml.  This script reads those declarations from local repo clones
+(created by clone_fastoss_b.py) — no network call or GitLab token needed.
+
+It then walks the local tf_export_* directories and copies each .tf file into:
 
     {output_dir}/{env}/{repo_name}/{BigQueryDataset|BigQueryTable|BigQueryRoutine}/...
 
@@ -16,46 +17,40 @@ Files whose dataset is not claimed by any repo land in:
 
 Usage (from Cloud Shell):
     # Process all environments
-    python organize_tf_export.py --gcp-project tefde-gcp-fastoss-dev-gke
+    python organize_tf_export.py
 
     # Process a single environment
-    python organize_tf_export.py --gcp-project tefde-gcp-fastoss-dev-gke --env prod-gke
+    python organize_tf_export.py --env prod-gke
 
     # Process several environments
-    python organize_tf_export.py --gcp-project tefde-gcp-fastoss-dev-gke --env prod,prod-gke
+    python organize_tf_export.py --env prod,prod-gke
+
+    # Dry run — print what would be copied without copying
+    python organize_tf_export.py --env prod --dry-run
 
 All options:
-    --gcp-project    ID      GCP project that holds the GitLab PAT in Secret Manager (required)
-    --secret-id      ID      Secret Manager secret ID (default: gitlab-token)
-    --gitlab-url     URL     GitLab base URL (default: https://dot-portal.de.pri.o2.com/gitlab)
-    --base-dir       PATH    Parent of tf_export_* dirs (default: /home/nq10083194)
-    --output-dir     PATH    Destination root (default: {base_dir}/terraform-export-by-repos)
-    --env / --envs   LIST    Comma-separated envs to process
-                             (default: prod,prod-gke,test,test-gke,dev,dev-gke)
-    --dry-run                Print what would be copied without copying
+    --repos-dir  PATH    Directory containing local repo clones with .gitlab-ci.yml files
+                         (default: /workspace/repos/fastossb)
+    --base-dir   PATH    Parent of tf_export_* dirs (default: /home/nq10083194)
+    --output-dir PATH    Destination root (default: {base_dir}/terraform-export-by-repos)
+    --env/--envs LIST    Comma-separated envs to process
+                         (default: prod,prod-gke,test,test-gke,dev,dev-gke)
+    --dry-run            Print what would be copied without copying
 """
 
 import argparse
-import os
 import shutil
 import sys
 from collections import defaultdict
 from pathlib import Path
-from urllib.parse import quote
 
-import subprocess
-
-import requests
 import yaml
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-GITLAB_GROUP = "fastoss_b/ndl_core"
 GITLAB_CI_FILE = ".gitlab-ci.yml"
-BRANCHES_TO_TRY = ["production", "master"]
-DEFAULT_GITLAB_URL = "https://dot-portal.de.pri.o2.com/gitlab"
 
 ENV_TO_PROJECT = {
     "prod":     "tefde-gcp-fastoss-prod",
@@ -70,78 +65,29 @@ RESOURCE_TYPES = ["BigQueryDataset", "BigQueryTable", "BigQueryRoutine"]
 
 
 # ---------------------------------------------------------------------------
-# Secret Manager
+# Phase 1 — build dataset → repo map from local clones
 # ---------------------------------------------------------------------------
 
-def get_gitlab_token(gcp_project: str, secret_id: str) -> str:
-    """Fetch the GitLab PAT from GCP Secret Manager via gcloud CLI."""
-    result = subprocess.run(
-        ["gcloud", "secrets", "versions", "access", "latest",
-         f"--secret={secret_id}", f"--project={gcp_project}"],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        print(f"ERROR fetching secret '{secret_id}' from project '{gcp_project}':")
-        print(result.stderr.strip())
-        print("\nHint: if your account lacks secretmanager.versions.access, pass the token "
-              "directly with --gitlab-token TOKEN (or set env var GITLAB_TOKEN).")
+def build_dataset_repo_map(repos_dir: Path) -> dict[str, str]:
+    """Walk repos_dir, find every .gitlab-ci.yml, parse BQ_DATASET_NAMES.
+
+    Returns {dataset_name: repo_name} where repo_name is the folder that
+    contains the .gitlab-ci.yml file.
+    """
+    print(f"\n=== Phase 1: Reading .gitlab-ci.yml files from {repos_dir} ===")
+    if not repos_dir.exists():
+        print(f"ERROR: repos-dir not found: {repos_dir}")
         sys.exit(1)
-    return result.stdout.strip()
-
-
-# ---------------------------------------------------------------------------
-# GitLab helpers
-# ---------------------------------------------------------------------------
-
-def _gitlab_get(session: requests.Session, url: str, **params) -> list[dict]:
-    """GET a paginated GitLab API endpoint and return all items."""
-    items: list[dict] = []
-    params.setdefault("per_page", 100)
-    while url:
-        resp = session.get(url, params=params, timeout=30)
-        resp.raise_for_status()
-        items.extend(resp.json())
-        url = resp.links.get("next", {}).get("url")
-        params = {}  # pagination URL already encodes params
-    return items
-
-
-def list_group_projects(session: requests.Session, gitlab_url: str) -> list[dict]:
-    group_enc = quote(GITLAB_GROUP, safe="")
-    url = f"{gitlab_url}/api/v4/groups/{group_enc}/projects"
-    projects = _gitlab_get(session, url, include_subgroups="false", archived="false")
-    print(f"  Found {len(projects)} project(s) in {GITLAB_GROUP}")
-    return projects
-
-
-def fetch_ci_yaml(session: requests.Session, gitlab_url: str, project_id: int) -> dict | None:
-    """Fetch and parse .gitlab-ci.yml for a project, trying multiple branches."""
-    file_enc = quote(GITLAB_CI_FILE, safe="")
-    for branch in BRANCHES_TO_TRY:
-        url = f"{gitlab_url}/api/v4/projects/{project_id}/repository/files/{file_enc}/raw"
-        try:
-            resp = session.get(url, params={"ref": branch}, timeout=30)
-            if resp.status_code == 200:
-                return yaml.safe_load(resp.text) or {}
-        except Exception:
-            pass
-    return None
-
-
-def build_dataset_repo_map(session: requests.Session, gitlab_url: str) -> dict[str, str]:
-    """Return {dataset_name: repo_name} from BQ_DATASET_NAMES in each repo's CI file."""
-    print("\n=== Phase 1: Reading GitLab repositories ===")
-    projects = list_group_projects(session, gitlab_url)
 
     dataset_repo_map: dict[str, str] = {}
     repos_with_datasets = 0
 
-    for project in projects:
-        name = project["path"]  # short project name, e.g. "auxiliary"
-        pid = project["id"]
-        ci = fetch_ci_yaml(session, gitlab_url, pid)
-        if ci is None:
-            print(f"  [{name}] .gitlab-ci.yml not found on branches {BRANCHES_TO_TRY}")
+    for ci_path in sorted(repos_dir.rglob(GITLAB_CI_FILE)):
+        repo_name = ci_path.parent.name  # folder name = GitLab project name
+        try:
+            ci = yaml.safe_load(ci_path.read_text(encoding="utf-8")) or {}
+        except Exception as exc:
+            print(f"  [{repo_name}] WARN: could not parse {ci_path}: {exc}")
             continue
 
         raw = ci.get("variables", {}).get("BQ_DATASET_NAMES", "")
@@ -150,21 +96,21 @@ def build_dataset_repo_map(session: requests.Session, gitlab_url: str) -> dict[s
 
         datasets = [d.strip() for d in str(raw).split(",") if d.strip()]
         repos_with_datasets += 1
-        print(f"  [{name}] {len(datasets)} dataset(s): {', '.join(datasets)}")
+        print(f"  [{repo_name}] {len(datasets)} dataset(s): {', '.join(datasets)}")
 
         for ds in datasets:
             if ds in dataset_repo_map:
                 print(f"  WARNING: dataset '{ds}' already claimed by "
-                      f"'{dataset_repo_map[ds]}', also claimed by '{name}' — keeping first")
+                      f"'{dataset_repo_map[ds]}', also claimed by '{repo_name}' — keeping first")
             else:
-                dataset_repo_map[ds] = name
+                dataset_repo_map[ds] = repo_name
 
     print(f"\n  Total: {repos_with_datasets} repo(s) → {len(dataset_repo_map)} dataset mapping(s)")
     return dataset_repo_map
 
 
 # ---------------------------------------------------------------------------
-# Export walking helpers
+# Phase 2 — walk export dirs and copy files
 # ---------------------------------------------------------------------------
 
 def _iter_resource_roots(base_dir: Path, env: str, project_id: str):
@@ -214,12 +160,8 @@ def collect_tf_files(base_dir: Path, env: str, project_id: str) -> list[tuple[st
     return results
 
 
-# ---------------------------------------------------------------------------
-# Copy logic
-# ---------------------------------------------------------------------------
-
 def copy_file(src: Path, dst: Path, dry_run: bool) -> bool:
-    """Copy src to dst.  Return True if the file was (would be) copied."""
+    """Copy src to dst. Return True if the file was (would be) copied."""
     if dst.exists():
         src_stat = src.stat()
         dst_stat = dst.stat()
@@ -254,7 +196,6 @@ def process_env(
         repo = dataset_repo_map.get(ds_name, "_unmapped")
 
         # Compute destination path, preserving sub-folder structure within the resource type.
-        # Find which root the file lives under so we can compute the relative tail.
         for _, root in _iter_resource_roots(base_dir, env, project_id):
             try:
                 rel_tail = src.relative_to(root)
@@ -282,25 +223,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--gitlab-token",
-        default=os.environ.get("GITLAB_TOKEN"),
-        metavar="TOKEN",
-        help="GitLab PAT (overrides Secret Manager lookup). "
-             "Also accepted via env var GITLAB_TOKEN.",
-    )
-    parser.add_argument(
-        "--gcp-project",
-        default=None,
-        help="GCP project ID used to look up the GitLab PAT in Secret Manager. "
-             "Required unless --gitlab-token is provided.",
-    )
-    parser.add_argument(
-        "--secret-id", default="gitlab-token",
-        help="Secret Manager secret ID that holds the GitLab PAT (default: gitlab-token)",
-    )
-    parser.add_argument(
-        "--gitlab-url", default=DEFAULT_GITLAB_URL,
-        help=f"GitLab base URL (default: {DEFAULT_GITLAB_URL})",
+        "--repos-dir", default="/workspace/repos/fastossb",
+        help="Directory containing local repo clones (default: /workspace/repos/fastossb)",
     )
     parser.add_argument(
         "--base-dir", default="/home/nq10083194",
@@ -308,23 +232,16 @@ def main() -> None:
     )
     parser.add_argument(
         "--output-dir", default=None,
-        help="Output root (default: {base_dir}/terraform-export-by-repos)",
+        help="Output root (default: {base-dir}/terraform-export-by-repos)",
     )
-    # --env and --envs are aliases for the same parameter
     env_group = parser.add_mutually_exclusive_group()
     env_group.add_argument(
-        "--env",
-        dest="envs",
-        default=None,
-        metavar="ENV[,ENV...]",
+        "--env", dest="envs", default=None, metavar="ENV[,ENV...]",
         help="Comma-separated env(s) to process, e.g. prod-gke or prod,prod-gke "
              "(default: all six)",
     )
     env_group.add_argument(
-        "--envs",
-        dest="envs",
-        default=None,
-        metavar="ENV[,ENV...]",
+        "--envs", dest="envs", default=None, metavar="ENV[,ENV...]",
         help="Alias for --env",
     )
     parser.add_argument("--dry-run", action="store_true",
@@ -332,6 +249,7 @@ def main() -> None:
     args = parser.parse_args()
 
     base_dir = Path(args.base_dir)
+    repos_dir = Path(args.repos_dir)
     output_dir = Path(args.output_dir) if args.output_dir else base_dir / "terraform-export-by-repos"
     envs_raw = args.envs if args.envs else ",".join(ENV_TO_PROJECT)
     envs = [e.strip() for e in envs_raw.split(",") if e.strip()]
@@ -341,23 +259,8 @@ def main() -> None:
         print(f"ERROR: unknown env(s): {unknown_envs}. Valid: {list(ENV_TO_PROJECT)}")
         sys.exit(1)
 
-    # Resolve GitLab token — direct flag takes priority over Secret Manager
-    if args.gitlab_token:
-        token = args.gitlab_token
-        print("Using GitLab token from --gitlab-token / GITLAB_TOKEN.")
-    elif args.gcp_project:
-        print(f"Fetching GitLab token from Secret Manager "
-              f"(project={args.gcp_project}, secret={args.secret_id}) ...")
-        token = get_gitlab_token(args.gcp_project, args.secret_id)
-    else:
-        print("ERROR: provide either --gitlab-token TOKEN or --gcp-project PROJECT_ID")
-        sys.exit(1)
-
-    session = requests.Session()
-    session.headers["PRIVATE-TOKEN"] = token
-
-    # Phase 1: build dataset → repo mapping from GitLab
-    dataset_repo_map = build_dataset_repo_map(session, args.gitlab_url.rstrip("/"))
+    # Phase 1: build dataset → repo mapping from local clones
+    dataset_repo_map = build_dataset_repo_map(repos_dir)
 
     # Phase 2: walk each env and copy files
     print(f"\n=== Phase 2: Copying Terraform files ({'DRY-RUN' if args.dry_run else 'LIVE'}) ===")
