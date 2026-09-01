@@ -40,12 +40,15 @@ All options:
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import yaml
+
+_DATASET_ID_RE = re.compile(r'dataset_id\s*=\s*"([^"]+)"')
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -133,16 +136,22 @@ def _iter_resource_roots(base_dir: Path, env: str, project_id: str):
                 yield rtype, candidate
 
 
-def dataset_from_path(rtype: str, rel: Path) -> str:
-    """Extract the BQ dataset name from a relative path within a resource-type folder."""
-    parts = rel.parts
-    if rtype == "BigQueryDataset":
-        # .../europe-west3/{dataset_name}.tf  OR  .../{dataset_name}.tf
-        return rel.stem
-    else:
-        # BigQueryTable/{dataset_name}/{table_name}.tf
-        # BigQueryRoutine/{dataset_name}/{routine_name}.tf
-        return parts[0] if parts else ""
+def dataset_from_tf(tf_file: Path) -> str:
+    """Extract the BQ dataset name from the dataset_id attribute inside a .tf file.
+
+    All gcloud bulk-export resource types (BigQueryTable, BigQueryDataset,
+    BigQueryRoutine) include a dataset_id = "..." line in their Terraform output.
+    Reading the file is more reliable than inferring the dataset from the path,
+    which varies by export layout.
+    """
+    try:
+        content = tf_file.read_text(encoding="utf-8")
+        m = _DATASET_ID_RE.search(content)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return ""
 
 
 def collect_tf_files(base_dir: Path, env: str, project_id: str) -> list[tuple[str, str, Path]]:
@@ -154,8 +163,7 @@ def collect_tf_files(base_dir: Path, env: str, project_id: str) -> list[tuple[st
             continue
         seen_roots.add(root)
         for tf_file in sorted(root.rglob("*.tf")):
-            rel = tf_file.relative_to(root)
-            ds = dataset_from_path(rtype, rel)
+            ds = dataset_from_tf(tf_file)
             if ds:
                 results.append((rtype, ds, tf_file))
     return results
@@ -196,17 +204,9 @@ def process_env(
     for rtype, ds_name, src in tf_files:
         repo = dataset_repo_map.get(ds_name, "_unmapped")
 
-        # Compute destination path, preserving sub-folder structure within the resource type.
-        for _, root in _iter_resource_roots(base_dir, env, project_id):
-            try:
-                rel_tail = src.relative_to(root)
-                break
-            except ValueError:
-                continue
-        else:
-            rel_tail = Path(src.name)
-
-        dst = env_out / repo / rtype / rel_tail
+        # Destination: flat per-dataset subfolder so tables from the same dataset
+        # are grouped together regardless of how the export laid them out on disk.
+        dst = env_out / repo / rtype / ds_name / src.name
         copied = copy_file(src, dst, dry_run)
         if copied:
             counts[repo] += 1
