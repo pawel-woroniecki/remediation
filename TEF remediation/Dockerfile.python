@@ -34,6 +34,7 @@ COPY clone_all_groups_repo/clone_fastoss_b.py                              scrip
 
 COPY git_branches_gap/report_branch_discrepancies_by_commit.py  scripts/
 COPY git_branches_gap/report_branch_discrepancies_by_content.py scripts/
+COPY scripts/generate_dataset_mapping.py                         scripts/
 
 COPY entrypoint.sh /app/run-report
 RUN chmod +x /app/run-report
