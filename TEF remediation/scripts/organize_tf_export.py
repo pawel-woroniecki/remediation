@@ -204,9 +204,12 @@ def process_env(
     for rtype, ds_name, src in tf_files:
         repo = dataset_repo_map.get(ds_name, "_unmapped")
 
-        # Destination: flat per-dataset subfolder so tables from the same dataset
-        # are grouped together regardless of how the export laid them out on disk.
-        dst = env_out / repo / rtype / ds_name / src.name
+        # BigQueryDataset: one file per dataset — no ds_name subfolder needed.
+        # BigQueryTable/Routine: group by dataset so sibling objects stay together.
+        if rtype == "BigQueryDataset":
+            dst = env_out / repo / rtype / src.name
+        else:
+            dst = env_out / repo / rtype / ds_name / src.name
         copied = copy_file(src, dst, dry_run)
         if copied:
             counts[repo] += 1
