@@ -89,7 +89,65 @@ resource "google_cloud_run_v2_job" "orphan_datasets" {
 }
 
 # ---------------------------------------------------------------------------
-# Job 2: Environment vs Code Drift
+# Job 2: Dataset → Repo Mapping (one-time / on-demand)
+# ---------------------------------------------------------------------------
+resource "google_cloud_run_v2_job" "dataset_mapping" {
+  name     = "devops-reports-dataset-mapping"
+  location = local.job_region
+  project  = local.job_project
+
+  depends_on = [google_project_service.run]
+
+  template {
+    template {
+      service_account = local.runner_sa
+      timeout         = local.job_timeout
+      max_retries     = local.job_max_retries
+
+      containers {
+        image = local.job_image
+
+        args = [
+          "dataset_mapping",
+          "--gcs-output",
+          "gs://${var.reports_gcs_bucket}/dataset-mapping/dataset_repo_map.json",
+        ]
+
+        env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+        env {
+          name  = "GITLAB_TOKEN_SECRET_ID"
+          value = var.gitlab_token_secret_id
+        }
+        env {
+          name  = "SUBGROUP"
+          value = var.gitlab_subgroup
+        }
+
+        resources {
+          limits = {
+            memory = local.job_memory
+            cpu    = local.job_cpu
+          }
+        }
+      }
+
+      vpc_access {
+        connector = data.google_vpc_access_connector.devops_reports.id
+        egress    = "ALL_TRAFFIC"
+      }
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Job 3: Environment vs Code Drift
 # ---------------------------------------------------------------------------
 resource "google_cloud_run_v2_job" "env_drift" {
   name     = "devops-reports-env-drift"

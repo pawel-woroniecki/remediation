@@ -21,7 +21,7 @@ fi
 REPORT_TYPE="${1:-}"
 if [[ -z "$REPORT_TYPE" ]]; then
     log_json "ERROR" "Usage: run-report <report_type> [args...]"
-    log_json "ERROR" "Valid report types: orphan_datasets, env_drift, commit_drift, file_drift"
+    log_json "ERROR" "Valid report types: orphan_datasets, env_drift, commit_drift, file_drift, dataset_mapping"
     exit 1
 fi
 shift
@@ -174,8 +174,21 @@ case "$REPORT_TYPE" in
             "$@"
         ;;
 
+    dataset_mapping)
+        WORKSPACE_ROOT="${REPO_ROOT:-/workspace/repos/fastossb}"
+        SUBGROUP="${SUBGROUP:-ndl_core}"
+        GITLAB_BASE_URL="${GITLAB_BASE_URL:-https://dot-portal.de.pri.o2.com/gitlab}"
+
+        clone_repos "$WORKSPACE_ROOT" "$GITLAB_BASE_URL"
+
+        exec python3 "$SCRIPTS_DIR/generate_dataset_mapping.py" \
+            --workspace-root "$WORKSPACE_ROOT" \
+            --subgroup       "$SUBGROUP" \
+            "$@"
+        ;;
+
     *)
-        log_json "ERROR" "Unknown report type: $REPORT_TYPE. Valid types: orphan_datasets, env_drift, commit_drift, file_drift"
+        log_json "ERROR" "Unknown report type: $REPORT_TYPE. Valid types: orphan_datasets, env_drift, commit_drift, file_drift, dataset_mapping"
         exit 1
         ;;
 esac

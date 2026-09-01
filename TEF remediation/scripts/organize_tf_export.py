@@ -39,6 +39,7 @@ All options:
 """
 
 import argparse
+import json
 import shutil
 import sys
 from collections import defaultdict
@@ -223,8 +224,16 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
+        "--mapping-file",
+        default=None,
+        metavar="PATH",
+        help="JSON file {dataset_name: repo_name} from the devops-reports-dataset-mapping "
+             "Cloud Run job. When provided, --repos-dir is ignored.",
+    )
+    parser.add_argument(
         "--repos-dir", default="/workspace/repos/fastossb",
-        help="Directory containing local repo clones (default: /workspace/repos/fastossb)",
+        help="Directory containing local repo clones (default: /workspace/repos/fastossb). "
+             "Ignored when --mapping-file is provided.",
     )
     parser.add_argument(
         "--base-dir", default="/home/nq10083194",
@@ -259,8 +268,14 @@ def main() -> None:
         print(f"ERROR: unknown env(s): {unknown_envs}. Valid: {list(ENV_TO_PROJECT)}")
         sys.exit(1)
 
-    # Phase 1: build dataset → repo mapping from local clones
-    dataset_repo_map = build_dataset_repo_map(repos_dir)
+    # Phase 1: build dataset → repo mapping
+    if args.mapping_file:
+        with open(args.mapping_file, encoding="utf-8") as f:
+            dataset_repo_map = json.load(f)
+        print(f"\n=== Phase 1: Loaded {len(dataset_repo_map)} dataset mapping(s) "
+              f"from {args.mapping_file} ===")
+    else:
+        dataset_repo_map = build_dataset_repo_map(repos_dir)
 
     # Phase 2: walk each env and copy files
     print(f"\n=== Phase 2: Copying Terraform files ({'DRY-RUN' if args.dry_run else 'LIVE'}) ===")
