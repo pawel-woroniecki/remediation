@@ -83,6 +83,8 @@ def get_gitlab_token(gcp_project: str, secret_id: str) -> str:
     if result.returncode != 0:
         print(f"ERROR fetching secret '{secret_id}' from project '{gcp_project}':")
         print(result.stderr.strip())
+        print("\nHint: if your account lacks secretmanager.versions.access, pass the token "
+              "directly with --gitlab-token TOKEN (or set env var GITLAB_TOKEN).")
         sys.exit(1)
     return result.stdout.strip()
 
@@ -280,8 +282,17 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--gcp-project", required=True,
-        help="GCP project ID used to look up the GitLab PAT in Secret Manager",
+        "--gitlab-token",
+        default=os.environ.get("GITLAB_TOKEN"),
+        metavar="TOKEN",
+        help="GitLab PAT (overrides Secret Manager lookup). "
+             "Also accepted via env var GITLAB_TOKEN.",
+    )
+    parser.add_argument(
+        "--gcp-project",
+        default=None,
+        help="GCP project ID used to look up the GitLab PAT in Secret Manager. "
+             "Required unless --gitlab-token is provided.",
     )
     parser.add_argument(
         "--secret-id", default="gitlab-token",
@@ -330,10 +341,17 @@ def main() -> None:
         print(f"ERROR: unknown env(s): {unknown_envs}. Valid: {list(ENV_TO_PROJECT)}")
         sys.exit(1)
 
-    # Fetch GitLab token from Secret Manager
-    print(f"Fetching GitLab token from Secret Manager "
-          f"(project={args.gcp_project}, secret={args.secret_id}) ...")
-    token = get_gitlab_token(args.gcp_project, args.secret_id)
+    # Resolve GitLab token — direct flag takes priority over Secret Manager
+    if args.gitlab_token:
+        token = args.gitlab_token
+        print("Using GitLab token from --gitlab-token / GITLAB_TOKEN.")
+    elif args.gcp_project:
+        print(f"Fetching GitLab token from Secret Manager "
+              f"(project={args.gcp_project}, secret={args.secret_id}) ...")
+        token = get_gitlab_token(args.gcp_project, args.secret_id)
+    else:
+        print("ERROR: provide either --gitlab-token TOKEN or --gcp-project PROJECT_ID")
+        sys.exit(1)
 
     session = requests.Session()
     session.headers["PRIVATE-TOKEN"] = token
