@@ -540,7 +540,12 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             if is_replace and len(entry.files) > 1:
                 entry.sql_fragments = [sql]
                 if object_type == "table":
-                    entry.columns = extract_columns_from_create_table(sql)
+                    new_cols = extract_columns_from_create_table(sql)
+                    entry.columns = new_cols
+                    # ALTER TABLE type-changes that predate this CREATE TABLE are superseded;
+                    # remove them so the post-processing loop doesn't overwrite the new types.
+                    for col in new_cols:
+                        entry.type_changes.pop(col, None)
                     entry.is_ctas = bool(_CTAS_RE.search(sql))
             else:
                 entry.sql_fragments.append(sql)
