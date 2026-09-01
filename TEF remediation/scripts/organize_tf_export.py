@@ -43,9 +43,10 @@ from collections import defaultdict
 from pathlib import Path
 from urllib.parse import quote
 
+import subprocess
+
 import requests
 import yaml
-from google.cloud import secretmanager
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -73,11 +74,17 @@ RESOURCE_TYPES = ["BigQueryDataset", "BigQueryTable", "BigQueryRoutine"]
 # ---------------------------------------------------------------------------
 
 def get_gitlab_token(gcp_project: str, secret_id: str) -> str:
-    """Fetch the GitLab PAT from GCP Secret Manager (same as clone_fastoss_b.py)."""
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{gcp_project}/secrets/{secret_id}/versions/latest"
-    response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("utf-8").strip()
+    """Fetch the GitLab PAT from GCP Secret Manager via gcloud CLI."""
+    result = subprocess.run(
+        ["gcloud", "secrets", "versions", "access", "latest",
+         f"--secret={secret_id}", f"--project={gcp_project}"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        print(f"ERROR fetching secret '{secret_id}' from project '{gcp_project}':")
+        print(result.stderr.strip())
+        sys.exit(1)
+    return result.stdout.strip()
 
 
 # ---------------------------------------------------------------------------
