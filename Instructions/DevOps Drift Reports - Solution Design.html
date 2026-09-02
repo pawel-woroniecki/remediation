@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DevOps Drift Reports — Solution Design</title>
+<style>
+  :root {
+    --blue: #0052CC;
+    --blue-light: #E6F0FF;
+    --blue-mid: #4C9AFF;
+    --navy: #172B4D;
+    --grey-dark: #42526E;
+    --grey-mid: #6B778C;
+    --grey-light: #DFE1E6;
+    --grey-bg: #F4F5F7;
+    --white: #FFFFFF;
+    --red: #DE350B;
+    --red-light: #FFEBE6;
+    --amber: #FF8B00;
+    --amber-light: #FFF7D6;
+    --green: #00875A;
+    --green-light: #E3FCEF;
+    --border: #DFE1E6;
+    --shadow: 0 1px 3px rgba(9,30,66,.13);
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --radius: 4px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --blue: #4C9AFF;
+      --blue-light: #1C2A3F;
+      --blue-mid: #4C9AFF;
+      --navy: #E6ECF5;
+      --grey-dark: #B8C4D4;
+      --grey-mid: #8C9DB5;
+      --grey-light: #2C3A4F;
+      --grey-bg: #1A2332;
+      --white: #1E2C3D;
+      --red: #FF5630;
+      --red-light: #2C1A14;
+      --amber: #FFAB00;
+      --amber-light: #2C2510;
+      --green: #36B37E;
+      --green-light: #0D2A1F;
+      --border: #2C3A4F;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--navy);
+    background: var(--white);
+  }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Page header ── */
+  .page-header {
+    background: var(--blue);
+    color: #fff;
+    padding: 28px 40px 24px;
+  }
+  .page-header h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    margin-bottom: 8px;
+  }
+  .meta-row {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    opacity: .85;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255,255,255,.18);
+    border-radius: 3px;
+    padding: 2px 8px;
+  }
+
+  /* ── Layout ── */
+  .layout {
+    display: flex;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+  }
+  .toc-col {
+    width: 220px;
+    flex-shrink: 0;
+    padding: 32px 24px 32px 0;
+  }
+  .toc {
+    position: sticky;
+    top: 20px;
+  }
+  .toc-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--grey-mid);
+    margin-bottom: 10px;
+  }
+  .toc ul { list-style: none; }
+  .toc li { margin: 2px 0; }
+  .toc a {
+    font-size: 13px;
+    color: var(--grey-dark);
+    display: block;
+    padding: 3px 8px;
+    border-radius: var(--radius);
+    border-left: 2px solid transparent;
+  }
+  .toc a:hover { background: var(--grey-bg); color: var(--blue); border-left-color: var(--blue); text-decoration: none; }
+  .toc .toc-sub { padding-left: 16px; }
+  .toc .toc-sub a { font-size: 12px; }
+  .content {
+    flex: 1;
+    min-width: 0;
+    padding: 32px 0 60px 32px;
+    border-left: 1px solid var(--border);
+  }
+
+  /* ── Sections ── */
+  .section { margin-bottom: 48px; }
+  h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--navy);
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--blue);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2 .icon { font-size: 18px; }
+  h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--navy);
+    margin: 24px 0 10px;
+  }
+  h4 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--grey-dark);
+    margin: 16px 0 6px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  p { margin-bottom: 12px; color: var(--grey-dark); }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; margin: 16px 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead th {
+    background: var(--grey-bg);
+    color: var(--navy);
+    font-weight: 700;
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--grey-dark);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--blue-light); }
+  code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--grey-bg);
+    color: var(--red);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ── Callouts ── */
+  .callout {
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin: 16px 0;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .callout-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .callout-body { flex: 1; }
+  .callout-body strong { display: block; margin-bottom: 4px; font-size: 13px; }
+  .callout-body p { margin: 0; font-size: 13px; }
+  .callout.info { background: var(--blue-light); border-left: 4px solid var(--blue); }
+  .callout.warning { background: var(--amber-light); border-left: 4px solid var(--amber); }
+  .callout.danger { background: var(--red-light); border-left: 4px solid var(--red); }
+  .callout.success { background: var(--green-light); border-left: 4px solid var(--green); }
+
+  /* ── Diagram cards ── */
+  .diagram-card {
+    background: var(--grey-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+  .diagram-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--grey-mid);
+    margin-bottom: 12px;
+  }
+
+  /* ── Status pills ── */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .pill.red { background: var(--red-light); color: var(--red); }
+  .pill.green { background: var(--green-light); color: var(--green); }
+  .pill.amber { background: var(--amber-light); color: var(--amber); }
+  .pill.blue { background: var(--blue-light); color: var(--blue); }
+
+  /* ── Action table ── */
+  .action-row-red td { background: var(--red-light); }
+  .action-row-amber td { background: var(--amber-light); }
+  .action-row-green td { background: var(--green-light); }
+
+  /* ── Component grid ── */
+  .comp-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .comp-card {
+    background: var(--grey-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .comp-card .comp-name {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--navy);
+    margin-bottom: 4px;
+  }
+  .comp-card .comp-type {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--blue);
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .comp-card p { font-size: 12px; margin: 0; }
+
+  /* ── Report flow cards ── */
+  .report-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 20px 0;
+    overflow: hidden;
+  }
+  .report-card-header {
+    background: var(--navy);
+    color: #fff;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .report-card-header h3 { color: #fff; margin: 0; font-size: 14px; }
+  .report-card-body { padding: 16px; }
+
+  /* ── Separator ── */
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+  /* ── Mermaid diagrams ── */
+  .mermaid { text-align: center; }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .toc-col { display: none; }
+    .content { border-left: none; padding-left: 0; }
+    .layout { padding: 0 16px; }
+    .page-header { padding: 20px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Page header -->
+<div class="page-header">
+  <h1>DevOps Drift Reports — Solution Design</h1>
+  <div class="meta-row">
+    <span class="badge">&#128197; Last updated: August 2026</span>
+    <span class="badge">&#9989; Version: 1.0</span>
+    <span class="badge">&#127968; Telefónica Germany / Capgemini</span>
+    <span class="badge">&#128274; Internal</span>
+  </div>
+</div>
+
+<div class="layout">
+  <!-- TOC sidebar -->
+  <nav class="toc-col">
+    <div class="toc">
+      <div class="toc-title">On this page</div>
+      <ul>
+        <li><a href="#summary">Executive Summary</a></li>
+        <li><a href="#architecture">Architecture</a>
+          <ul class="toc-sub">
+            <li><a href="#arch-overview">High-level overview</a></li>
+            <li><a href="#arch-components">Components</a></li>
+            <li><a href="#arch-schedule">Schedule</a></li>
+          </ul>
+        </li>
+        <li><a href="#reports">How each report works</a>
+          <ul class="toc-sub">
+            <li><a href="#rep-env">Environment Drift</a></li>
+            <li><a href="#rep-commit">Commit Drift</a></li>
+            <li><a href="#rep-file">File Drift</a></li>
+            <li><a href="#rep-orphan">Orphan Datasets</a></li>
+          </ul>
+        </li>
+        <li><a href="#dashboards">Dashboard guide</a></li>
+        <li><a href="#metrics">Metrics reference</a></li>
+        <li><a href="#actions">When to act</a>
+          <ul class="toc-sub">
+            <li><a href="#act-dev">DEV team</a></li>
+            <li><a href="#act-ops">OPS team</a></li>
+          </ul>
+        </li>
+        <li><a href="#refs">References</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <main class="content">
+
+    <!-- Executive Summary -->
+    <section class="section" id="summary">
+      <h2><span class="icon">&#128203;</span>Executive Summary</h2>
+      <p>The <strong>DevOps Drift Reports</strong> system automatically detects discrepancies between what is defined in source code (GitLab) and what is actually deployed in GCP environments. It runs six scheduled Cloud Run Jobs every morning and populates BigQuery tables that power Looker Studio dashboards for both operations teams and management.</p>
+
+      <div class="callout info">
+        <span class="callout-icon">&#8505;&#65039;</span>
+        <div class="callout-body">
+          <strong>Why it exists</strong>
+          <p>Manual comparison between code and deployed infrastructure does not scale across 40+ repositories. This system provides automated daily visibility into four types of drift: schema differences, missing branch merges, file content divergence, and abandoned BigQuery datasets.</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Report type</th><th>What it detects</th><th>Environments</th><th>Audience</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Environment Drift</strong></td><td>BigQuery schema differs from DDL / dbt YAML in git</td><td>prod, test, dev</td><td>DEV, OPS</td></tr>
+            <tr><td><strong>Commit Drift</strong></td><td>Commits present in one branch but missing from another</td><td>master &harr; production &harr; test</td><td>DEV</td></tr>
+            <tr><td><strong>File Drift</strong></td><td>File content differs between branches (added / modified / deleted)</td><td>master &harr; production &harr; test</td><td>DEV</td></tr>
+            <tr><td><strong>Orphan Datasets</strong></td><td>BigQuery datasets with no corresponding source code</td><td>prod</td><td>OPS, DEV</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section class="section" id="architecture">
+      <h2><span class="icon">&#127959;&#65039;</span>Architecture</h2>
+
+      <h3 id="arch-overview">High-level overview</h3>
+      <div class="diagram-card">
+        <div class="diagram-label">System architecture</div>
+        <div class="mermaid">
+flowchart LR
+    GL["GitLab\nfastoss subgroup\n40+ repos"]
+    CS["Cloud Scheduler\n6 triggers\n05:00-05:50 Berlin"]
+    CRJ["Cloud Run Jobs\n6 jobs\ntefde-gcp-fastoss-dev-gke"]
+    GCP_P["GCP prod\ntefde-gcp-fastoss-prod\nBQ schema + GCS"]
+    GCP_T["GCP test\ntefde-gcp-fastoss-test\nBQ schema + GCS"]
+    GCP_D["GCP dev\ntefde-gcp-fastoss-dev-gke\nBQ schema"]
+    BQ[("BigQuery\ntefde-gcp-fastoss-dev\ndevops_reports dataset")]
+    GCS[("GCS\nReport files\n.md / .csv")]
+    LS["Looker Studio\n6 dashboards"]
+
+    CS -->|"HTTP POST RunJob"| CRJ
+    CRJ -->|"git clone"| GL
+    CRJ -->|"read schema"| GCP_P
+    CRJ -->|"read schema"| GCP_T
+    CRJ -->|"read schema"| GCP_D
+    CRJ -->|"write findings"| BQ
+    CRJ -->|"upload report"| GCS
+    BQ -->|"data source"| LS
+        </div>
+      </div>
+
+      <h3 id="arch-components">Components</h3>
+      <div class="comp-grid">
+        <div class="comp-card">
+          <div class="comp-type">Orchestration</div>
+          <div class="comp-name">Cloud Scheduler</div>
+          <p>Triggers each Cloud Run Job via HTTP POST to the Cloud Run Admin API. 6 schedules staggered from 05:00&ndash;05:50 Berlin time.</p>
+        </div>
+        <div class="comp-card">
+          <div class="comp-type">Compute</div>
+          <div class="comp-name">Cloud Run Jobs</div>
+          <p>Stateless containers (Docker image) running the Python report scripts. Each job scans all repos in the <code>fastoss</code> subgroup in parallel.</p>
+        </div>
+        <div class="comp-card">
+          <div class="comp-type">Source of truth</div>
+          <div class="comp-name">GitLab</div>
+          <p>All repositories in the <code>fastoss</code> subgroup. Repos are cloned at job start. <code>demo_*</code> repos are excluded automatically.</p>
+        </div>
+        <div class="comp-card">
+          <div class="comp-type">Storage</div>
+          <div class="comp-name">BigQuery &mdash; devops_reports</div>
+          <p>Central dataset in <code>tefde-gcp-fastoss-dev</code> holding all findings, execution metadata, and pre-built dashboard views.</p>
+        </div>
+        <div class="comp-card">
+          <div class="comp-type">Storage</div>
+          <div class="comp-name">GCS</div>
+          <p>Markdown/CSV report files uploaded per execution. Links are surfaced in the env_drift_summary dashboard for drill-down.</p>
+        </div>
+        <div class="comp-card">
+          <div class="comp-type">Visualisation</div>
+          <div class="comp-name">Looker Studio</div>
+          <p>Six dashboards built on top of BigQuery views. Management dashboard, per-environment env drift, branch drift, file drift, orphan datasets.</p>
+        </div>
+        <div class="comp-card">
+          <div class="comp-type">IaC</div>
+          <div class="comp-name">Terraform</div>
+          <p>All Cloud Run Jobs, Cloud Scheduler, BigQuery tables and views are defined in Terraform. Apply is required after any infrastructure change.</p>
+        </div>
+        <div class="comp-card">
+          <div class="comp-type">Secrets</div>
+          <div class="comp-name">Secret Manager</div>
+          <p>GitLab Personal Access Token stored as <code>gitlab-token</code> in <code>tefde-gcp-fastoss-dev-gke</code>. Read by jobs at runtime.</p>
+        </div>
+      </div>
+
+      <h3 id="arch-schedule">Daily schedule</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time (Berlin)</th><th>Cloud Run Job</th><th>Report type</th><th>Target environment</th><th>BQ project scanned</th></tr></thead>
+          <tbody>
+            <tr><td>05:00</td><td><code>devops-reports-orphan-datasets</code></td><td>Orphan Datasets</td><td>prod</td><td><code>tefde-gcp-fastoss-prod</code></td></tr>
+            <tr><td>05:10</td><td><code>devops-reports-env-drift</code></td><td>Environment Drift</td><td>prod</td><td><code>tefde-gcp-fastoss-prod</code></td></tr>
+            <tr><td>05:20</td><td><code>devops-reports-commit-drift</code></td><td>Commit Drift</td><td>&mdash;</td><td>GitLab only</td></tr>
+            <tr><td>05:30</td><td><code>devops-reports-file-drift</code></td><td>File Drift</td><td>&mdash;</td><td>GitLab only</td></tr>
+            <tr><td>05:40</td><td><code>devops-reports-env-drift-test</code></td><td>Environment Drift</td><td>test</td><td><code>tefde-gcp-fastoss-test</code></td></tr>
+            <tr><td>05:50</td><td><code>devops-reports-env-drift-dev</code></td><td>Environment Drift</td><td>dev</td><td><code>tefde-gcp-fastoss-dev-gke</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- How each report works -->
+    <section class="section" id="reports">
+      <h2><span class="icon">&#9881;&#65039;</span>How each report works</h2>
+
+      <!-- env_drift -->
+      <div class="report-card" id="rep-env">
+        <div class="report-card-header">
+          <h3>Environment Drift (env_drift)</h3>
+          <span class="pill blue">prod &middot; test &middot; dev</span>
+        </div>
+        <div class="report-card-body">
+          <p>Compares what is defined in the git branch (SQL DDL files and dbt YAML models) against the <em>actual</em> BigQuery schema in the target GCP project. Detects objects that exist in code but are not deployed, objects that are deployed but have no code definition, and objects where the schema or definition has diverged.</p>
+          <div class="diagram-card">
+            <div class="diagram-label">env_drift flow &mdash; per environment</div>
+            <div class="mermaid">
+flowchart TD
+    A["Cloud Scheduler trigger"] --> B["Cloud Run Job starts\nloads GitLab token from Secret Manager"]
+    B --> C["Clone all repos in fastoss subgroup\nskip demo_* repos"]
+    C --> D{{"For each repo\n(parallel)"}}
+    D --> E["Parse DDL / dbt YAML\nfrom git branch\nproduction / test / master"]
+    D --> F["Query BQ INFORMATION_SCHEMA\nin target GCP project"]
+    E & F --> G["Compare schemas\nobject by object"]
+    G --> H{{"Differences\nfound?"}}
+    H -- "Yes" --> I["Write rows to\nenv_drift_findings\n(one row per drifted object)"]
+    H -- "No" --> J["Write execution record\nto executions table\nstatus = success"]
+    I --> J
+    J --> K["Upload report.md\nto GCS bucket"]
+            </div>
+          </div>
+          <h4>What it compares</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Object type</th><th>Source in git</th><th>Compared against</th></tr></thead>
+            <tbody>
+              <tr><td>BigQuery tables / views</td><td>SQL DDL files (<code>CREATE TABLE</code>, <code>CREATE VIEW</code>)</td><td><code>INFORMATION_SCHEMA.TABLES</code> + <code>COLUMNS</code></td></tr>
+              <tr><td>dbt models</td><td><code>schema.yml</code> / <code>models/*.sql</code></td><td>BQ dataset schema via INFORMATION_SCHEMA</td></tr>
+              <tr><td>GCS objects</td><td>Files listed in repo's <code>.gitlab-ci.yml</code> bucket reference</td><td>Composer GCS bucket content</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- commit_drift -->
+      <div class="report-card" id="rep-commit">
+        <div class="report-card-header">
+          <h3>Commit Drift (commit_drift)</h3>
+          <span class="pill amber">Branch comparison</span>
+        </div>
+        <div class="report-card-body">
+          <p>Finds commits that exist in one branch but are absent from another. This reveals cherry-picks that were never back-merged, hotfixes applied directly to production, or test-environment changes never promoted to master.</p>
+          <div class="diagram-card">
+            <div class="diagram-label">commit_drift flow</div>
+            <div class="mermaid">
+flowchart TD
+    A["Cloud Scheduler trigger"] --> B["Clone all repos"]
+    B --> C{{"For each repo\n(parallel)"}}
+    C --> D["Compare 6 branch pairs:\nmaster&lt;&gt;production\nmaster&lt;&gt;test\nproduction&lt;&gt;test\n(both directions each)"]
+    D --> E["Find commits in right branch\nnot present in left branch\n(git log A..B)"]
+    E --> F["Write KPI summary\nto branch_drift_kpis\n(one row per repo x direction)"]
+    F --> G["Write commit detail\nto branch_drift_evidence\n(one row per commit x file)"]
+    G --> H["Write execution record\nto executions table"]
+            </div>
+          </div>
+          <h4>Branch directions explained</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Direction</th><th>Meaning</th><th>Must be 0?</th></tr></thead>
+            <tbody>
+              <tr><td><code>production not in master</code></td><td>Hotfix in production never merged back to master</td><td><span class="pill red">&#128680; Yes</span></td></tr>
+              <tr><td><code>production not in test</code></td><td>Production commit never promoted to test</td><td><span class="pill red">&#128680; Yes</span></td></tr>
+              <tr><td><code>test not in master</code></td><td>Test-env commit never merged to master</td><td><span class="pill red">&#128680; Yes</span></td></tr>
+              <tr><td><code>master not in production</code></td><td>Feature merged to master, not yet released</td><td><span class="pill green">&#10003; OK</span></td></tr>
+              <tr><td><code>master not in test</code></td><td>Feature merged to master, not yet in test</td><td><span class="pill green">&#10003; OK</span></td></tr>
+              <tr><td><code>test not in production</code></td><td>Feature tested but not yet released</td><td><span class="pill green">&#10003; OK</span></td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- file_drift -->
+      <div class="report-card" id="rep-file">
+        <div class="report-card-header">
+          <h3>File Content Drift (file_drift)</h3>
+          <span class="pill amber">Branch comparison</span>
+        </div>
+        <div class="report-card-body">
+          <p>Complements commit drift by detecting file-level differences between branches regardless of commit history. Catches cases where files were modified directly (e.g. by force-push or rebase) without creating a traceable commit difference.</p>
+          <div class="diagram-card">
+            <div class="diagram-label">file_drift flow</div>
+            <div class="mermaid">
+flowchart TD
+    A["Cloud Scheduler trigger"] --> B["Clone all repos"]
+    B --> C{{"For each repo\n(parallel)"}}
+    C --> D["git diff --name-status\nbetween branch pairs"]
+    D --> E["Classify each file:\nAdded / Modified / Deleted / Renamed"]
+    E --> F["Write KPI summary\nto branch_drift_kpis\n(drift_type = content)"]
+    F --> G["Write file detail\nto branch_drift_evidence"]
+    G --> H["Write execution record"]
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- orphan_datasets -->
+      <div class="report-card" id="rep-orphan">
+        <div class="report-card-header">
+          <h3>Orphan Datasets (orphan_datasets)</h3>
+          <span class="pill red">Prod only</span>
+        </div>
+        <div class="report-card-body">
+          <p>Lists BigQuery datasets in the production GCP project that have no corresponding source code reference in any repository. These are candidates for cleanup or adoption &mdash; they represent storage cost and governance risk.</p>
+          <div class="diagram-card">
+            <div class="diagram-label">orphan_datasets flow</div>
+            <div class="mermaid">
+flowchart TD
+    A["Cloud Scheduler trigger"] --> B["Cloud Run Job starts"]
+    B --> C["List all BQ datasets\nin tefde-gcp-fastoss-prod\nvia INFORMATION_SCHEMA"]
+    B --> D["Clone all repos\nfrom GitLab"]
+    D --> E["Extract dataset references\nfrom DDL / dbt / CI files"]
+    C & E --> F["Find datasets with\nno code reference"]
+    F --> G["Score each orphan\nby risk: age x size x table_count"]
+    G --> H["Write to orphan_datasets\nand orphan_dataset_objects"]
+    H --> I["Write execution record"]
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Dashboard guide -->
+    <section class="section" id="dashboards">
+      <h2><span class="icon">&#128202;</span>Dashboard guide</h2>
+      <p>All dashboards are in Looker Studio and connect to the <code>devops_reports</code> dataset in <code>tefde-gcp-fastoss-dev</code>.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Dashboard</th><th>Audience</th><th>Key questions it answers</th><th>Data source</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Management Dashboard</strong><br><em>Discrepancy status in repositories</em></td>
+              <td>Managers, QA leads</td>
+              <td>Which repos have any kind of drift today? Red/green status per repo across all four report types.</td>
+              <td><code>management_dashboard</code> view</td>
+            </tr>
+            <tr>
+              <td><strong>Env Drift Summary &mdash; Prod</strong></td>
+              <td>OPS, DEV leads</td>
+              <td>Which repos have BQ schema drift in production? Link to the detailed report file on GCS.</td>
+              <td><code>env_drift_summary</code> view<br>filter: environment = prod</td>
+            </tr>
+            <tr>
+              <td><strong>Env Drift Summary &mdash; Test</strong></td>
+              <td>DEV, QA</td>
+              <td>Which repos have schema drift in the test environment?</td>
+              <td><code>env_drift_summary</code> view<br>filter: environment = test</td>
+            </tr>
+            <tr>
+              <td><strong>Env Drift Summary &mdash; Dev</strong></td>
+              <td>DEV</td>
+              <td>Which repos have schema drift in the dev environment?</td>
+              <td><code>env_drift_summary</code> view<br>filter: environment = dev</td>
+            </tr>
+            <tr>
+              <td><strong>Branch Drift (Commit)</strong></td>
+              <td>DEV leads, Release managers</td>
+              <td>Which branches are diverging? Are there commits in production that are missing from master?</td>
+              <td>Custom query on <code>branch_drift_kpis</code></td>
+            </tr>
+            <tr>
+              <td><strong>File Drift</strong></td>
+              <td>DEV leads</td>
+              <td>Which files differ between branches? How many additions, deletions, modifications?</td>
+              <td>Custom query on <code>branch_drift_kpis</code></td>
+            </tr>
+            <tr>
+              <td><strong>Orphan Datasets</strong></td>
+              <td>OPS, Data platform team</td>
+              <td>Which BQ datasets have no code owner? How many orphans today vs 30 days ago?</td>
+              <td>Custom queries on <code>orphan_datasets</code></td>
+            </tr>
+            <tr>
+              <td><strong>Job Status (Overview)</strong></td>
+              <td>OPS</td>
+              <td>Did all six jobs run successfully today? Which failed and when?</td>
+              <td>Custom query on <code>executions</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Metrics reference -->
+    <section class="section" id="metrics">
+      <h2><span class="icon">&#128208;</span>Metrics reference</h2>
+
+      <h3>Environment Drift metrics</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Field</th><th>Description</th><th>How to interpret</th></tr></thead>
+        <tbody>
+          <tr><td><code>bq_findings</code></td><td>Count of BigQuery objects with schema drift</td><td>0 = all good. Any value &gt; 0 means deployed schema differs from code.</td></tr>
+          <tr><td><code>gcs_findings</code></td><td>Count of GCS objects with drift</td><td>0 = all good. Non-zero means files in Composer bucket differ from repo.</td></tr>
+          <tr><td><code>drift_category</code></td><td>Type of discrepancy found</td><td><code>only_in_env</code>: deployed but no code; <code>only_in_source</code>: in code but not deployed; <code>schema_mismatch</code>: column types differ; <code>definition_mismatch</code>: view SQL differs.</td></tr>
+          <tr><td><code>severity</code></td><td>Impact rating of the drift</td><td><code>high</code>: breaking change (type mismatch, missing object); <code>medium</code>: significant difference; <code>low</code>: cosmetic / whitespace.</td></tr>
+          <tr><td><code>in_env_not_in_code</code></td><td>Objects deployed that have no git definition</td><td>Shadow objects &mdash; created manually or by a process not tracked in git. Should be codified or removed.</td></tr>
+          <tr><td><code>in_code_not_in_env</code></td><td>Objects defined in git but not yet deployed</td><td>Pending deployments. Normal during a release but concerning if persistent for days.</td></tr>
+          <tr><td><code>content_mismatch</code></td><td>Objects that exist in both but differ</td><td>Schema has drifted post-deploy. Most critical &mdash; production is running code different from the repo.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Commit Drift metrics</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Field</th><th>Description</th><th>How to interpret</th></tr></thead>
+        <tbody>
+          <tr><td><code>unique_commits</code></td><td>Number of commits present in one branch but not the other</td><td>For red-flag directions (production not in master etc.): must be 0. For acceptable directions: informational.</td></tr>
+          <tr><td><code>drift_direction</code></td><td>Which branch has the extra commits</td><td>Format: "<em>X</em> not in <em>Y</em>" &mdash; X has commits that Y lacks. See table in the commit_drift section above.</td></tr>
+          <tr><td><code>severity</code></td><td>Risk level of the drift</td><td><code>high</code>: production-critical direction; <code>medium</code>: test branch divergence; <code>low</code>: minor.</td></tr>
+          <tr><td><code>red_flags</code></td><td>Sum of <code>unique_commits</code> for the 3 critical directions only</td><td>Shown in the management dashboard. Must be 0. Non-zero = immediate action required.</td></tr>
+          <tr><td><code>distinct_authors</code></td><td>Number of distinct commit authors contributing to the drift</td><td>Helps identify who needs to create the merge request.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>File Drift metrics</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Field</th><th>Description</th><th>How to interpret</th></tr></thead>
+        <tbody>
+          <tr><td><code>unique_files</code></td><td>Total files differing between the two branches</td><td>Higher = more diverged. Focus on <code>files_deleted</code> first &mdash; deletions in production not in master are most dangerous.</td></tr>
+          <tr><td><code>files_added</code></td><td>Files present in right branch, missing in left</td><td>New files not yet promoted. Normal ahead of a release.</td></tr>
+          <tr><td><code>files_modified</code></td><td>Files that exist in both branches but with different content</td><td>Most common. Compare with commit drift to understand whether this is tracked or an out-of-band change.</td></tr>
+          <tr><td><code>files_deleted</code></td><td>Files deleted in right branch but still in left</td><td>High priority &mdash; production may be missing a file that master still has (or vice versa).</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Orphan Dataset metrics</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Field</th><th>Description</th><th>How to interpret</th></tr></thead>
+        <tbody>
+          <tr><td><code>orphan_status</code></td><td>Classification of the dataset</td><td><code>orphan</code>: confirmed no code reference; <code>possible_orphan</code>: weak match found; <code>matched</code>: code reference found (should not appear in findings).</td></tr>
+          <tr><td><code>risk_score</code></td><td>0&ndash;100 score combining age, size, and table count</td><td>Score &gt; 75: high risk, prioritise for cleanup or adoption. Score &lt; 25: likely safe to ignore short-term.</td></tr>
+          <tr><td><code>total_storage_mb</code></td><td>Total storage used by all objects in the dataset</td><td>Large orphans with high risk score are the primary cleanup candidates.</td></tr>
+          <tr><td><code>days_since_modified</code></td><td>Days since the most recent object in the dataset was changed</td><td>&gt; 180 days with no code reference = strong orphan signal.</td></tr>
+          <tr><td><code>dataset_count</code> (trend)</td><td>Number of orphan datasets on a given day</td><td>Increasing trend = orphan growth is outpacing cleanup. Flat or decreasing = healthy.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- Action guide -->
+    <section class="section" id="actions">
+      <h2><span class="icon">&#128680;</span>When to act</h2>
+
+      <div class="callout warning">
+        <span class="callout-icon">&#9888;&#65039;</span>
+        <div class="callout-body">
+          <strong>Daily check</strong>
+          <p>The recommended workflow is to open the <strong>Management Dashboard</strong> each morning after 06:00 Berlin time (all six jobs will have completed by then). Any red cell is a starting point for investigation.</p>
+        </div>
+      </div>
+
+      <h3 id="act-dev">DEV team actions</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Signal</th><th>Where to see it</th><th>Severity</th><th>Action required</th></tr></thead>
+        <tbody>
+          <tr class="action-row-red">
+            <td><strong>Red flags &gt; 0</strong><br><small>production or test commits missing from master</small></td>
+            <td>Management Dashboard &rarr; Red flags column<br>Branch Drift page &rarr; &#9888; columns</td>
+            <td><span class="pill red">&#128680; Immediate</span></td>
+            <td>Open a merge request to back-merge the missing commits into master. Investigate <em>why</em> a commit landed in production without going through master (hotfix process failure?).</td>
+          </tr>
+          <tr class="action-row-red">
+            <td><strong>content_mismatch (high severity)</strong><br><small>deployed schema differs from code</small></td>
+            <td>Env Drift Summary &rarr; BQ/GCS findings &gt; 0<br>Env Drift detail page &rarr; severity = high</td>
+            <td><span class="pill red">&#128680; Immediate</span></td>
+            <td>Determine whether the deployment or the code is the source of truth. Either re-deploy or update the DDL in git. Raise with the release manager if in prod.</td>
+          </tr>
+          <tr class="action-row-amber">
+            <td><strong>in_code_not_in_env &gt; 0</strong><br><small>objects defined but not yet deployed</small></td>
+            <td>Env Drift detail page &rarr; in_code_not_in_env column</td>
+            <td><span class="pill amber">&#9888;&#65039; Monitor</span></td>
+            <td>Normal during a release window. If persistent for &gt; 2 days after a release, trigger a re-deploy or investigate pipeline failures.</td>
+          </tr>
+          <tr class="action-row-amber">
+            <td><strong>schema_mismatch (medium severity)</strong></td>
+            <td>Env Drift detail page &rarr; drift_category = schema_mismatch</td>
+            <td><span class="pill amber">&#9888;&#65039; Investigate</span></td>
+            <td>Review the column type difference. If intentional (migration), update the DDL in git. If unintentional, roll back or re-apply the correct migration.</td>
+          </tr>
+          <tr class="action-row-green">
+            <td><strong>master not in production &gt; 0</strong></td>
+            <td>Branch Drift page &rarr; master not in production column</td>
+            <td><span class="pill green">&#10003; Normal</span></td>
+            <td>No action needed. This means features are merged to master awaiting the next release to production. Expected before a release cut.</td>
+          </tr>
+          <tr class="action-row-green">
+            <td><strong>in_env_not_in_code (low severity)</strong></td>
+            <td>Env Drift detail page &rarr; in_env_not_in_code</td>
+            <td><span class="pill green">&#10003; Low priority</span></td>
+            <td>Object exists in GCP but has no git definition. Either codify it (add DDL to the repo) or plan for removal if it is no longer needed.</td>
+          </tr>
+        </tbody>
+      </table></div>
+
+      <h3 id="act-ops">OPS team actions</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Signal</th><th>Where to see it</th><th>Severity</th><th>Action required</th></tr></thead>
+        <tbody>
+          <tr class="action-row-red">
+            <td><strong>Job status = failed</strong></td>
+            <td>Job Status page &rarr; Status column</td>
+            <td><span class="pill red">&#128680; Immediate</span></td>
+            <td>Check Cloud Run logs in GCP Console for the failed job. Common causes: GitLab token expired, IAM grant missing, network issue. The job retries once automatically; if still failing, investigate manually.</td>
+          </tr>
+          <tr class="action-row-red">
+            <td><strong>Orphan dataset risk_score &gt; 75</strong></td>
+            <td>Orphan Datasets page &rarr; risk_score column</td>
+            <td><span class="pill red">&#128680; Action needed</span></td>
+            <td>Contact the dataset owner (see <code>owner</code> field). Either add a code definition to the owning repo, or schedule the dataset for deletion if it is confirmed unused.</td>
+          </tr>
+          <tr class="action-row-amber">
+            <td><strong>Orphan count trend increasing</strong></td>
+            <td>Orphan Datasets &rarr; Over time chart</td>
+            <td><span class="pill amber">&#9888;&#65039; Monitor</span></td>
+            <td>Investigate which datasets were added to the orphan list recently (filter by date range). Escalate to the data platform team if growth exceeds 10% week-over-week.</td>
+          </tr>
+          <tr class="action-row-amber">
+            <td><strong>env_drift job running but all repos skipped</strong></td>
+            <td>executions table &mdash; check <code>status = skipped</code> rows</td>
+            <td><span class="pill amber">&#9888;&#65039; Investigate</span></td>
+            <td>Repos are skipped when the GitLab clone fails or the repo has no recognisable DDL/dbt structure. Check if a new repo type was added that the scanner doesn&rsquo;t recognise.</td>
+          </tr>
+          <tr class="action-row-green">
+            <td><strong>All jobs = success, management dashboard all green</strong></td>
+            <td>Management Dashboard, Job Status page</td>
+            <td><span class="pill green">&#10003; All clear</span></td>
+            <td>No action needed. The system is healthy.</td>
+          </tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- References -->
+    <section class="section" id="refs">
+      <h2><span class="icon">&#128279;</span>References</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Resource</th><th>Location</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Source code</strong></td><td>GitHub &mdash; <code>pawel-woroniecki/remediation</code></td><td>Python report scripts, Terraform IaC, SQL files, instruction docs</td></tr>
+          <tr><td><strong>Terraform workspace</strong></td><td><code>TEF remediation/Terraform/</code></td><td>Cloud Run Jobs, Cloud Scheduler, BigQuery tables/views definitions</td></tr>
+          <tr><td><strong>Looker Studio SQL files</strong></td><td><code>TEF remediation/looker_sql/</code></td><td>Custom query SQL for each Looker Studio data source</td></tr>
+          <tr><td><strong>IAM grants reference</strong></td><td><code>TEF remediation/IAM_admin_instructions.md</code></td><td>Every IAM binding required by the runner service account</td></tr>
+          <tr><td><strong>Dashboard build guides</strong></td><td><code>Instructions/*.md</code></td><td>Step-by-step instructions for building each Looker Studio dashboard</td></tr>
+          <tr><td><strong>Cloud Run Jobs (GCP Console)</strong></td><td>GCP Console &rarr; <code>tefde-gcp-fastoss-dev-gke</code> &rarr; Cloud Run &rarr; Jobs</td><td>Trigger jobs manually, view execution logs, check status</td></tr>
+          <tr><td><strong>BigQuery dataset</strong></td><td>GCP Console &rarr; <code>tefde-gcp-fastoss-dev</code> &rarr; BigQuery &rarr; <code>devops_reports</code></td><td>Query raw findings tables, verify view definitions</td></tr>
+          <tr><td><strong>Service account</strong></td><td><code>devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com</code></td><td>Runtime identity for all Cloud Run Jobs. Managed by TEF IAM Team.</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="callout info" style="margin-top:24px;">
+        <span class="callout-icon">&#128161;</span>
+        <div class="callout-body">
+          <strong>Rebuilding the Docker image</strong>
+          <p>After any Python script change, rebuild the Docker image and push it to Artifact Registry (<code>europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-runner</code>). The Cloud Run Jobs always pull the <code>latest</code> tag &mdash; no Terraform apply is needed for image-only changes.</p>
+        </div>
+      </div>
+      <div class="callout warning" style="margin-top:12px;">
+        <span class="callout-icon">&#9881;&#65039;</span>
+        <div class="callout-body">
+          <strong>Infrastructure changes require terraform apply</strong>
+          <p>Changes to Cloud Run Job environment variables, schedules, BigQuery view definitions, or table schemas only take effect after <code>terraform apply</code> is run from the <code>TEF remediation/Terraform/</code> directory. Editing the <code>.tf</code> files alone is not sufficient.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'default' });
+</script>
+<script>
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const el = document.querySelector(a.getAttribute('href'));
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+</body>
+</html>
