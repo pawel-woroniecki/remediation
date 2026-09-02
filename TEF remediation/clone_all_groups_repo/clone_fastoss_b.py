@@ -158,7 +158,11 @@ def clone_or_update(dest: Path, repo_url: str, default_branch: str | None, hard_
         safe_url = repo_url.split("@")[-1] if "@" in repo_url else repo_url
         print(f"Cloning: {safe_url} -> {dest}")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        _git(["clone", repo_url, str(dest)])
+        clone_cmd = ["clone"]
+        if default_branch:
+            clone_cmd += ["-b", default_branch]
+        clone_cmd += [repo_url, str(dest)]
+        _git(clone_cmd)
         # Strip credentials from the remote URL so the token is not stored in .git/config
         clean_url = repo_url.split("@")[-1] if "@" in repo_url else repo_url
         clean_url = f"{urlparse(repo_url).scheme}://{clean_url}"
