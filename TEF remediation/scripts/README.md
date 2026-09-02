@@ -122,3 +122,175 @@ python "TEF remediation/scripts/composer_dag_status_report.py" \
 
 Import the CSV into **Google Sheets** (`File → Import`) to get clickable links in the
 `airflow_ui_link` column that open directly in the Airflow UI.
+
+---
+
+### 4. `generate_dataset_mapping.py`
+
+**Purpose**
+Cloud Run job entrypoint (report type: `dataset_mapping`). Clones all GitLab repos in
+`fastoss_b/ndl_core`, reads the `BQ_DATASET_NAMES` variable from each repo's
+`.gitlab-ci.yml`, and writes a JSON file `{dataset_name: repo_name}` to GCS.
+
+The output is consumed by `organize_tf_export.py` (see below) so that Terraform export
+files can be sorted into the correct GitLab repository folder without requiring direct
+access to GitLab from Cloud Shell.
+
+**When to re-run**
+Re-run any time a new repo is added to `ndl_core` or its `BQ_DATASET_NAMES` list
+changes.
+
+**IAM required** (Cloud Run service account `devops-reports-runner`)
+- `roles/storage.objectAdmin` on the reports GCS bucket
+- `roles/secretmanager.secretAccessor` on the `gitlab-token` secret
+
+**Run via Cloud Run job**
+```bash
+gcloud run jobs execute devops-reports-dataset-mapping \
+  --region europe-west3 \
+  --project tefde-gcp-fastoss-dev-gke \
+  --wait
+```
+
+**Inspect the output**
+```bash
+gsutil cp \
+  gs://tefde-gcp-fastoss-dev-gcs-devops-reports/dataset-mapping/dataset_repo_map.json \
+  .
+cat dataset_repo_map.json | python3 -m json.tool | head -30
+```
+
+**Output**
+A JSON file at `gs://<reports_bucket>/dataset-mapping/dataset_repo_map.json`:
+```json
+{
+  "il_5gias": "integration_layer",
+  "fault_mgmt_core": "fault_mgmt",
+  ...
+}
+```
+
+---
+
+### 5. `organize_tf_export.py`
+
+**Purpose**
+One-off script to reorganise the Terraform files produced by
+`gcloud beta resource-config bulk-export` into a folder hierarchy that mirrors the
+GitLab repository structure.
+
+Each BigQuery resource (dataset, table, routine) is placed under the GitLab repo that
+owns its BQ dataset, based on the `dataset_id` attribute read from the `.tf` file
+content. Files whose dataset is not claimed by any repo land in `_unmapped/`.
+
+**Output structure**
+```
+terraform-export-by-repos/
+└── prod/
+    ├── integration_layer/
+    │   ├── BigQueryDataset/
+    │   │   └── il-5gias.tf
+    │   ├── BigQueryTable/
+    │   │   └── il_5gias/
+    │   │       ├── table-a.tf
+    │   │       └── table-b.tf
+    │   └── BigQueryRoutine/
+    │       └── il_5gias/
+    │           └── routine-a.tf
+    ├── fault_mgmt/
+    │   └── ...
+    └── _unmapped/
+        └── BigQueryTable/
+            └── shared_dataset/
+                └── orphan-table.tf
+```
+
+**Prerequisites**
+- `gcloud beta resource-config bulk-export` already run; output is in
+  `~/tf_export_<env>/` directories (e.g. `~/tf_export_prod/`)
+- `dataset_repo_map.json` downloaded from GCS (see step 1 below)
+- Python packages: `pip install pyyaml` (only needed for the `--repos-dir` path; not
+  required when using `--mapping-file`)
+
+**IAM required** (Cloud Shell user)
+- None beyond what is needed to download the mapping file from GCS
+  (`roles/storage.objectViewer` on the reports bucket)
+
+**Typical workflow**
+
+Step 1 — generate and download the dataset→repo mapping (one-time or when repos change):
+```bash
+# Trigger the Cloud Run job
+gcloud run jobs execute devops-reports-dataset-mapping \
+  --region europe-west3 \
+  --project tefde-gcp-fastoss-dev-gke \
+  --wait
+
+# Download the mapping file to Cloud Shell
+gsutil cp \
+  gs://tefde-gcp-fastoss-dev-gcs-devops-reports/dataset-mapping/dataset_repo_map.json \
+  .
+```
+
+Step 2 — dry run to preview what will be copied:
+```bash
+cd ~/remediation
+python "TEF remediation/scripts/organize_tf_export.py" \
+  --mapping-file dataset_repo_map.json \
+  --env prod \
+  --dry-run
+```
+
+Step 3 — run for real:
+```bash
+python "TEF remediation/scripts/organize_tf_export.py" \
+  --mapping-file dataset_repo_map.json \
+  --env prod
+```
+
+**All options**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--mapping-file PATH` | _(none)_ | JSON file from the `dataset_mapping` Cloud Run job. When provided, `--repos-dir` is ignored. |
+| `--repos-dir PATH` | `/workspace/repos/fastossb` | Local repo clones with `.gitlab-ci.yml` files. Used only if `--mapping-file` is not given. |
+| `--base-dir PATH` | `/home/nq10083194` | Parent of `tf_export_*` export directories. |
+| `--output-dir PATH` | `{base-dir}/terraform-export-by-repos` | Destination root for the reorganised files. |
+| `--env / --envs LIST` | all six | Comma-separated list of environments to process: `prod`, `prod-gke`, `test`, `test-gke`, `dev`, `dev-gke`. |
+| `--dry-run` | off | Print what would be copied without writing any files. |
+
+**Examples**
+
+Process a single environment:
+```bash
+python "TEF remediation/scripts/organize_tf_export.py" \
+  --mapping-file dataset_repo_map.json \
+  --env prod
+```
+
+Process multiple environments at once:
+```bash
+python "TEF remediation/scripts/organize_tf_export.py" \
+  --mapping-file dataset_repo_map.json \
+  --env prod,prod-gke
+```
+
+Process all six environments:
+```bash
+python "TEF remediation/scripts/organize_tf_export.py" \
+  --mapping-file dataset_repo_map.json
+```
+
+Override the export source and output directories:
+```bash
+python "TEF remediation/scripts/organize_tf_export.py" \
+  --mapping-file dataset_repo_map.json \
+  --base-dir   /home/myuser \
+  --output-dir /home/myuser/tf-by-repo \
+  --env prod
+```
+
+**Output**
+Prints a per-repo file count for each environment and a grand total.
+Re-running is safe — files that already exist and are identical (same size and
+modification time) are skipped.
