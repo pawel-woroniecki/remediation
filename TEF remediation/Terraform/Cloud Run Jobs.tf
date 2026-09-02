@@ -129,6 +129,10 @@ resource "google_cloud_run_v2_job" "dataset_mapping" {
           name  = "SUBGROUP"
           value = var.gitlab_subgroup
         }
+        env {
+          name  = "CLONE_BRANCH"
+          value = "production"
+        }
 
         resources {
           limits = {
