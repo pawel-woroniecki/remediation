@@ -39,13 +39,21 @@ clone_repos() {
 
     mkdir -p "$workspace_root"
     log_json "INFO" "Cloning group repos to $workspace_root"
+
+    local branch_arg=()
+    if [[ -n "${CLONE_BRANCH:-}" ]]; then
+        branch_arg=(--branch "$CLONE_BRANCH")
+        log_json "INFO" "Cloning branch: $CLONE_BRANCH"
+    fi
+
     python3 "$SCRIPTS_DIR/clone_fastoss_b.py" \
         --target-dir "$workspace_root" \
         --gitlab-base-url "$gitlab_base_url" \
         --clone-protocol https \
         --skip-workspace \
         --gcp-project "${GCP_PROJECT:?GCP_PROJECT must be set}" \
-        --secret-id "${GITLAB_TOKEN_SECRET_ID:-gitlab-token}"
+        --secret-id "${GITLAB_TOKEN_SECRET_ID:-gitlab-token}" \
+        "${branch_arg[@]}"
 }
 
 case "$REPORT_TYPE" in

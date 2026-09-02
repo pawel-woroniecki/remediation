@@ -214,6 +214,12 @@ def parse_args() -> argparse.Namespace:
         default="gitlab-token",
         help="Secret Manager secret ID that holds the GitLab PAT.",
     )
+    parser.add_argument(
+        "--branch",
+        default=None,
+        help="Branch to check out for every repo, overriding each repo's default branch "
+             "(e.g. main, prod). When omitted, the GitLab-reported default branch is used.",
+    )
     return parser.parse_args()
 
 
@@ -251,7 +257,7 @@ def main() -> int:
         rel = (path[len(args.group_path) + 1:]
                if path.startswith(f"{args.group_path}/") else path)
         dest = target_dir / rel
-        default_branch = proj.get("default_branch")
+        default_branch = args.branch or proj.get("default_branch")
 
         if args.clone_protocol == "ssh":
             repo_url = proj["ssh_url_to_repo"]
