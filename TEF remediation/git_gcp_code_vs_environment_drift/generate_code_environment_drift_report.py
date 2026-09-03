@@ -680,16 +680,21 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def build_dbt_snapshot_names(snapshot_dir: Path) -> set[str]:
-    """Return BQ table names declared as dbt snapshots (YAML files under dbt/snapshots/).
+    """Return BQ table names declared as dbt snapshots.
 
-    dbt snapshot objects have no .sql DDL — dbt manages the BQ table at runtime.
-    Including them in expected_names suppresses spurious only_in_bq findings.
+    Searches all *.yml files anywhere under dbt/ whose path contains a
+    'snapshots' directory component (e.g. dbt/pl/snapshots/history_link/
+    history_link.yml). dbt snapshot objects have no .sql DDL — dbt manages
+    the BQ table at runtime — so including them in expected_names suppresses
+    spurious only_in_bq findings.
     """
     names: set[str] = set()
-    snapshots_root = snapshot_dir / "dbt" / "snapshots"
-    if not snapshots_root.exists():
+    dbt_root = snapshot_dir / "dbt"
+    if not dbt_root.exists():
         return names
-    for yml_file in sorted(snapshots_root.rglob("*.yml")):
+    for yml_file in sorted(dbt_root.rglob("*.yml")):
+        if "snapshots" not in yml_file.parts:
+            continue
         try:
             data = yaml.safe_load(yml_file.read_text(encoding="utf-8")) or {}
         except Exception:
