@@ -346,7 +346,7 @@ def apply_substitutions(snapshot_dir: Path, replacements: dict[str, str]) -> Non
 # The lookahead also allows ( to handle bodies wrapped in parentheses:
 #   CREATE VIEW … AS (SELECT …)  — BQ INFORMATION_SCHEMA returns the body without parens.
 _CREATE_AS_HEADER_RE = re.compile(
-    r"^\s*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+.*?\bas\s+(?=\(|select\b|with\b)",
+    r"^\s*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+.*?\bas\s+(?=\(|select\b|with\b|--)",
     re.IGNORECASE | re.DOTALL,
 )
 
