@@ -5,6 +5,7 @@ from google.cloud import bigquery, storage
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import argparse
+import yaml
 import csv
 import hashlib
 import json
@@ -678,6 +679,28 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
     return inventory
 
 
+def build_dbt_snapshot_names(snapshot_dir: Path) -> set[str]:
+    """Return BQ table names declared as dbt snapshots (YAML files under dbt/snapshots/).
+
+    dbt snapshot objects have no .sql DDL — dbt manages the BQ table at runtime.
+    Including them in expected_names suppresses spurious only_in_bq findings.
+    """
+    names: set[str] = set()
+    snapshots_root = snapshot_dir / "dbt" / "snapshots"
+    if not snapshots_root.exists():
+        return names
+    for yml_file in sorted(snapshots_root.rglob("*.yml")):
+        try:
+            data = yaml.safe_load(yml_file.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        for entry in data.get("snapshots", []):
+            name = entry.get("name")
+            if name:
+                names.add(str(name).lower())
+    return names
+
+
 def build_source_dag_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
     """Collect DAG ids defined in Python so the report captures generator coverage."""
     inventory: dict[str, dict[str, Any]] = {}
@@ -995,6 +1018,7 @@ def compare_bigquery(
     actual_bq: dict[str, dict[str, Any]],
     project_id: str,
     renamed_away_names: set[str] | None = None,
+    dbt_snapshot_names: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Compare source-side BQ/dbt expectations with actual BigQuery objects in the selected target project."""
     renamed_away_names = renamed_away_names or set()
@@ -1025,7 +1049,7 @@ def compare_bigquery(
             and name not in actual_names
         )
     }
-    expected_names = set(source_bq) | deployable_dbt_names
+    expected_names = set(source_bq) | deployable_dbt_names | (dbt_snapshot_names or set())
 
     for object_name in sorted((actual_names - expected_names) - renamed_away_names):
         if object_name.lower().startswith("merge_"):
@@ -1480,6 +1504,7 @@ def main() -> int:
 
         source_bq, renamed_away_names = build_source_bq_inventory(snapshot_dir)
         source_dbt = build_source_dbt_inventory(snapshot_dir)
+        dbt_snapshot_names = build_dbt_snapshot_names(snapshot_dir)
         source_dags = build_source_dag_inventory(snapshot_dir)
         source_files = collect_source_files(snapshot_dir)
 
@@ -1504,6 +1529,7 @@ def main() -> int:
                 actual_bq,
                 args.gcp_project,
                 renamed_away_names,
+                dbt_snapshot_names,
             )
         else:
             actual_bq = {}
