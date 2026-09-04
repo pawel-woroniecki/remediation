@@ -294,6 +294,7 @@ resource "google_bigquery_table" "execution_daily_summary" {
         COUNT(*)                                              AS total_count,
         SAFE_DIVIDE(COUNTIF(status = 'success'), COUNT(*))   AS success_rate
       FROM `${var.reporting_project_id}.devops_reports.executions`
+      WHERE NOT (report_type = 'env_drift' AND project_name = '_job_summary')
       GROUP BY 1, 2
     EOT
     use_legacy_sql = false
@@ -420,6 +421,7 @@ resource "google_bigquery_table" "management_dashboard" {
           AND e.status = 'success'
           AND COALESCE(e.environment, 'prod') = 'prod'
           AND COALESCE(e.project_name, f.product) IS NOT NULL
+          AND e.project_name != '_job_summary'
         GROUP BY e.execution_id, COALESCE(e.project_name, f.product), DATE(e.execution_ts), e.execution_ts
       ),
 
