@@ -78,6 +78,16 @@ WHERE report_type  = 'env_drift'
 ORDER BY execution_ts DESC
 ```
 
+> **Important — "Enable date range parameters" must be unchecked.**
+> When using a custom query, Looker Studio shows a checkbox labelled **"Enable date range
+> parameters"** at the bottom of the query editor. Leave it **unchecked**. If it is
+> checked, Looker Studio expects the query itself to contain `@DS_START_DATE` /
+> `@DS_END_DATE` placeholders, and it hides the chart-level "Date range dimension" option
+> — meaning the page-level date range control will have no effect on the table, even after
+> you set a date dimension. With the box unchecked, Looker Studio handles date filtering
+> at the chart level and the "Date range dimension" field appears correctly in the chart
+> Setup panel.
+
 Name the data source `Env Drift Job Runs`.
 
 ---
@@ -133,11 +143,16 @@ succeeding or intermittently producing warnings.
 1. **Insert → Table**.
 2. Use the **Custom Query** data source from Step 1 (not the view, so you get all
    historical rows, not just the latest).
-3. **Dimensions:** `execution_ts`, `environment`, `triggered_by`, `status`
-4. **Metrics:** `repos_total`, `repos_launched`, `repos_success`, `repos_failed`,
+3. **Dimensions:** `execution_ts`, `environment`, `triggered_by`, `status`,
+   `repos_total`, `repos_launched`, `repos_success`, `repos_failed`,
    `repos_skipped`, `duration_seconds`
-5. **Sort:** `execution_ts` descending (newest first).
-6. **Rows per page:** 20–30.
+   - Keep all columns as **Dimensions** (no Metrics). This is required for the date
+     range control to work — the "Date range dimension" option only appears in the
+     chart Setup panel when the Metrics section is empty.
+4. **Sort:** `execution_ts` descending (newest first).
+5. **Rows per page:** 20–30.
+6. In the **Setup** panel, set **Date range dimension** to `execution_ts`.
+   This connects the table to the page-level date range control.
 
 ---
 
