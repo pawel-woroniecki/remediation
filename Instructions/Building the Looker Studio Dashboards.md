@@ -315,6 +315,32 @@ Choose the view that suits your audience:
 
 Two additional views are already defined in `BQ DS + Tables.tf` and require no custom query — connect to them directly as table data sources.
 
+### `env_drift_job_summary` — job-level run status
+
+**Connect:** Add data → BigQuery → `tefde-gcp-fastoss-dev` → `devops_reports` → `env_drift_job_summary`
+
+Returns one row per environment showing the **latest** Cloud Run job execution status and repo counts.
+
+**Fields:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `execution_ts` | Date dimension | Job start timestamp |
+| `environment` | Dimension | `prod`, `test`, or `dev` |
+| `status` | Dimension | `success` / `success_with_warnings` / `failed` |
+| `repos_total` | Metric | Directories found in subgroup after cloning |
+| `repos_launched` | Metric | Repos actually processed (had `.git`, not excluded) |
+| `repos_success` | Metric | Repos that completed without error |
+| `repos_failed` | Metric | Repos that exited with a non-zero code |
+| `repos_skipped` | Metric | `repos_total − repos_launched` (clone failures + excluded repos) |
+| `duration_seconds` | Metric | Total job elapsed time in seconds |
+
+**Status meanings:** `success` = all repos processed OK; `success_with_warnings` = some repos were skipped (clone failure or `EXCLUDE_REPOS` match); `failed` = one or more repos exited non-zero.
+
+For a full step-by-step setup guide including conditional formatting and historical backfill SQL, see `Instructions/Building the Job Run Status Dashboard.md`.
+
+---
+
 ### `env_drift_summary` — per-repository env-drift dashboard
 
 **Connect:** Add data → BigQuery → `tefde-gcp-fastoss-dev` → `devops_reports` → `env_drift_summary`
