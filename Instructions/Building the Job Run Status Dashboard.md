@@ -188,15 +188,102 @@ Insert these controls above the table and scorecards:
 
 ## Backfilling historical rows
 
-The new `repos_total / repos_launched / repos_success / repos_failed` columns are NULL
-for execution rows written before this feature was deployed. After `terraform apply`, run
-the following BigQuery DML to populate historical rows with approximate values (replace
-`<reporting_project>` with `tefde-gcp-fastoss-dev` and `42` with the actual current repo
-count):
+Two separate backfill steps are needed after the feature is first deployed:
+
+### Step 1 — Insert missing `_job_summary` rows for all historical runs
+
+The `_job_summary` row (one per job run) is only written by the entrypoint after the
+feature is deployed. Runs before that deployment have per-repo rows in `executions` but
+no summary row, so the Job Run Status table is blank for those dates.
+
+Run the SQL below **once** in BigQuery console (replace `<project>` with
+`tefde-gcp-fastoss-dev`). The `AND execution_ts < MIN(_job_summary)` guard prevents
+inserting duplicates for runs that already have a summary row, so it is safe to re-run:
+
+```sql
+INSERT INTO `<project>.devops_reports.executions`
+  (execution_id, report_type, project_name, execution_ts, environment,
+   git_ref, source_mode, triggered_by, status, duration_seconds, gcs_path,
+   repos_total, repos_launched, repos_success, repos_failed)
+
+WITH
+per_repo AS (
+  SELECT *
+  FROM `<project>.devops_reports.executions`
+  WHERE report_type   = 'env_drift'
+    AND project_name != '_job_summary'
+    AND execution_ts < (
+      SELECT MIN(execution_ts)
+      FROM `<project>.devops_reports.executions`
+      WHERE report_type  = 'env_drift'
+        AND project_name = '_job_summary'
+    )
+),
+with_lag AS (
+  SELECT *,
+    LAG(execution_ts) OVER (
+      PARTITION BY environment, DATE(execution_ts, 'Europe/Berlin')
+      ORDER BY execution_ts
+    ) AS lag_ts
+  FROM per_repo
+),
+grouped AS (
+  SELECT *,
+    SUM(
+      CASE
+        WHEN lag_ts IS NULL
+          OR TIMESTAMP_DIFF(execution_ts, lag_ts, MINUTE) > 5
+        THEN 1 ELSE 0
+      END
+    ) OVER (
+      PARTITION BY environment, DATE(execution_ts, 'Europe/Berlin')
+      ORDER BY execution_ts
+    ) AS run_group
+  FROM with_lag
+)
+SELECT
+  GENERATE_UUID()                                               AS execution_id,
+  'env_drift'                                                   AS report_type,
+  '_job_summary'                                                AS project_name,
+  MIN(execution_ts)                                             AS execution_ts,
+  environment,
+  ANY_VALUE(git_ref)                                            AS git_ref,
+  ANY_VALUE(source_mode)                                        AS source_mode,
+  ANY_VALUE(triggered_by)                                       AS triggered_by,
+  IF(COUNTIF(status = 'failed') > 0, 'failed', 'success')      AS status,
+  TIMESTAMP_DIFF(MAX(execution_ts), MIN(execution_ts), SECOND)  AS duration_seconds,
+  CAST(NULL AS STRING)                                          AS gcs_path,
+  COUNT(*)                                                      AS repos_total,
+  COUNT(*)                                                      AS repos_launched,
+  COUNTIF(status IN ('success', 'skipped'))                     AS repos_success,
+  COUNTIF(status = 'failed')                                    AS repos_failed
+FROM grouped
+GROUP BY environment, DATE(execution_ts, 'Europe/Berlin'), run_group
+```
+
+Verify the result:
+
+```sql
+SELECT DATE(execution_ts, 'Europe/Berlin') AS run_date, environment, COUNT(*) AS job_runs
+FROM `<project>.devops_reports.executions`
+WHERE report_type = 'env_drift' AND project_name = '_job_summary'
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2;
+```
+
+Each date should show one row per job run per environment. `repos_skipped` will be 0 for
+backfilled rows because the per-repo records don't capture clone failures — only runs after
+deployment will have an accurate `repos_skipped` count.
+
+### Step 2 — Set repo counts on historical per-repo rows
+
+The `repos_total / repos_launched / repos_success / repos_failed` columns are NULL for
+per-repo rows written before deployment. Run the UPDATE below (replace `<project>` and `42`
+with the actual repo count at the time):
 
 ```sql
 -- Historical success runs
-UPDATE `<reporting_project>.devops_reports.executions`
+UPDATE `<project>.devops_reports.executions`
 SET repos_total    = 42,
     repos_launched = 42,
     repos_success  = 42,
@@ -207,7 +294,7 @@ WHERE report_type   = 'env_drift'
   AND repos_total IS NULL;
 
 -- Historical failed runs
-UPDATE `<reporting_project>.devops_reports.executions`
+UPDATE `<project>.devops_reports.executions`
 SET repos_total    = 42,
     repos_launched = 42,
     repos_success  = 0,
@@ -220,9 +307,8 @@ WHERE report_type   = 'env_drift'
 
 The `AND repos_total IS NULL` guard makes both statements safe to re-run.
 
-> **Note:** The backfill uses fixed approximations (42 repos, all success or all failed).
-> These historical rows will not show `success_with_warnings` status. Only runs after
-> deployment will have accurate per-category counts.
+> **Note:** Step 2 uses fixed approximations. Historical per-repo rows will not show
+> `success_with_warnings` status. Only runs after deployment will have accurate counts.
 
 ---
 
