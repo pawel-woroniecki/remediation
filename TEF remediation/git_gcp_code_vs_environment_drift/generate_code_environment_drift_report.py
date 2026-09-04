@@ -649,11 +649,11 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
             continue
         content = sql_file.read_text(encoding="utf-8", errors="replace")
         stem_lower = sql_file.stem.lower()
-        # Mirror the BQ DDL convention (build_source_bq_inventory): tmp_* models are
-        # ephemeral/temp and never create permanent BigQuery objects, even when the
-        # per-file config says materialized='table' (project-level dbt_project.yml
-        # overrides take precedence at runtime).
-        if stem_lower.startswith("tmp_"):
+        materialized = extract_materialization(content)
+        # Skip tmp_* models unless they explicitly declare materialized='table'.
+        # Without an explicit 'table' declaration, project-level dbt_project.yml
+        # overrides may make them ephemeral at runtime.
+        if stem_lower.startswith("tmp_") and materialized != "table":
             continue
         # A real dbt model always contains Jinja syntax ({{ config(, {{ ref(, {{ source(,
         # or {%...%} control blocks).  Files without any Jinja are plain SQL scripts that
@@ -668,7 +668,6 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
         ):
             continue
         is_dbt_model = bool(re.search(r"\{\{\s*config\s*\(", content, re.IGNORECASE))
-        materialized = extract_materialization(content)
         inventory[sql_file.stem] = {
             "object_name": sql_file.stem,
             "relative_path": str(sql_file.relative_to(snapshot_dir)).replace("\\", "/"),
