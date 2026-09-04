@@ -84,6 +84,28 @@ case "$REPORT_TYPE" in
             exit 1
         fi
 
+        # Parse --reporting-project and other args forwarded to the Python script.
+        # These are needed for the job-level summary BQ row written at the end.
+        _REPORTING_PROJECT="${GCP_PROJECT:-}"
+        _TARGET_ENV="prod"
+        _GIT_REF=""
+        _SOURCE_MODE="branch"
+        _args=("$@")
+        for _i in "${!_args[@]}"; do
+            case "${_args[$_i]}" in
+                --reporting-project) _REPORTING_PROJECT="${_args[$((_i+1))]}" ;;
+                --target-env)        _TARGET_ENV="${_args[$((_i+1))]}" ;;
+                --git-ref)           _GIT_REF="${_args[$((_i+1))]}" ;;
+                --source-mode)       _SOURCE_MODE="${_args[$((_i+1))]}" ;;
+            esac
+        done
+
+        # Job-level counters for the summary row.
+        _JOB_START_TS=$(date +%s)
+        _repos_total=0
+        _repos_no_git=0
+        _repos_excluded=0
+
         # Cap concurrency — running every repo at once exhausts container memory
         # once the subgroup grows past a handful of repos (OOM-killed processes,
         # no clean error). Override via the ENV_DRIFT_MAX_PARALLEL env var.
@@ -95,8 +117,15 @@ case "$REPORT_TYPE" in
         pids=()
 
         for repo_path in "$SUBGROUP_ROOT"/*/; do
-            [[ -d "$repo_path/.git" ]] || continue
+            [[ -d "$repo_path" ]] || continue
             project_name=$(basename "$repo_path")
+            _repos_total=$((_repos_total + 1))
+
+            if [[ ! -d "$repo_path/.git" ]]; then
+                _repos_no_git=$((_repos_no_git + 1))
+                log_json "WARNING" "env_drift: skipping $project_name — no .git directory (clone failed?)"
+                continue
+            fi
 
             # Skip repos matching any pattern in EXCLUDE_REPOS (space-separated, glob supported).
             # Uses bash case for glob matching so patterns like 'demo_*' work.
@@ -107,6 +136,7 @@ case "$REPORT_TYPE" in
                 esac
             done
             if [[ $_excluded -eq 1 ]]; then
+                _repos_excluded=$((_repos_excluded + 1))
                 log_json "INFO" "env_drift: skipping excluded repo $project_name (matches EXCLUDE_REPOS)"
                 continue
             fi
@@ -139,18 +169,70 @@ case "$REPORT_TYPE" in
         # before the exit-file loop has had a chance to run.
         wait "${pids[@]}" || true
 
-        FAILED=0
+        _repos_launched=0
+        _repos_success=0
+        _repos_failed=0
         for exit_file in "$WORK_TMPDIR"/*.exit; do
             [[ -f "$exit_file" ]] || continue
+            _repos_launched=$((_repos_launched + 1))
             code=$(cat "$exit_file")
-            if [[ "$code" != "0" ]]; then
+            if [[ "$code" == "0" ]]; then
+                _repos_success=$((_repos_success + 1))
+            else
+                _repos_failed=$((_repos_failed + 1))
                 log_json "WARNING" "env_drift failed for $(basename "$exit_file" .exit)"
-                FAILED=$((FAILED + 1))
             fi
         done
 
-        if [[ $FAILED -gt 0 ]]; then
-            log_json "ERROR" "$FAILED repo(s) failed in env_drift"
+        # Determine overall job status for the summary row.
+        if [[ $_repos_failed -gt 0 ]]; then
+            _job_status="failed"
+        elif [[ $_repos_no_git -gt 0 ]]; then
+            _job_status="success_with_warnings"
+        else
+            _job_status="success"
+        fi
+
+        _JOB_DURATION=$(( $(date +%s) - _JOB_START_TS ))
+        _JOB_EXEC_ID="${CLOUD_RUN_EXECUTION:-$(python3 -c 'import uuid; print(uuid.uuid4())')}"
+
+        log_json "INFO" "env_drift summary: total=$_repos_total no_git=$_repos_no_git excluded=$_repos_excluded launched=$_repos_launched success=$_repos_success failed=$_repos_failed status=$_job_status"
+
+        # Write job-level summary row to BQ so the dashboard can display overall
+        # run status, repo counts, and warnings about skipped repos.
+        python3 - <<PYEOF || log_json "WARNING" "Failed to write job summary row to BQ — dashboard will not reflect this run"
+import sys
+from datetime import datetime, timezone
+from google.cloud import bigquery
+
+bq = bigquery.Client(project="${_REPORTING_PROJECT}", location="europe-west3")
+row = {
+    "execution_id":     "${_JOB_EXEC_ID}",
+    "report_type":      "env_drift",
+    "project_name":     "_job_summary",
+    "execution_ts":     datetime.now(timezone.utc).isoformat(),
+    "environment":      "${_TARGET_ENV}",
+    "git_ref":          "${_GIT_REF}" or None,
+    "source_mode":      "${_SOURCE_MODE}",
+    "triggered_by":     "${TRIGGERED_BY:-manual}",
+    "status":           "${_job_status}",
+    "duration_seconds": ${_JOB_DURATION},
+    "gcs_path":         None,
+    "repos_total":      ${_repos_total},
+    "repos_launched":   ${_repos_launched},
+    "repos_success":    ${_repos_success},
+    "repos_failed":     ${_repos_failed},
+}
+errors = bq.insert_rows_json(
+    "${_REPORTING_PROJECT}.devops_reports.executions", [row]
+)
+if errors:
+    print(f"BQ insert errors: {errors}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+
+        if [[ $_repos_failed -gt 0 ]]; then
+            log_json "ERROR" "$_repos_failed repo(s) failed in env_drift"
             exit 1
         fi
         log_json "INFO" "env_drift completed for all repos in $SUBGROUP"

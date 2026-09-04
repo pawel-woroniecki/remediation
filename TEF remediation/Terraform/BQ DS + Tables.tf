@@ -144,7 +144,11 @@ resource "google_bigquery_table" "executions" {
     { name = "triggered_by", type = "STRING" },
     { name = "status", type = "STRING" },
     { name = "duration_seconds", type = "INT64" },
-    { name = "gcs_path", type = "STRING" }
+    { name = "gcs_path", type = "STRING" },
+    { name = "repos_total", type = "INT64" },
+    { name = "repos_launched", type = "INT64" },
+    { name = "repos_success", type = "INT64" },
+    { name = "repos_failed", type = "INT64" }
   ])
 
   time_partitioning {
@@ -341,6 +345,46 @@ resource "google_bigquery_table" "env_drift_summary" {
         gcs_findings,
         report_url
       FROM agg
+    EOT
+    use_legacy_sql = false
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Looker Studio view — env_drift job-level run summary
+# ---------------------------------------------------------------------------
+# One row per Cloud Run job execution (project_name = '_job_summary').
+# Shows overall status (success / success_with_warnings / failed) plus
+# repo counts so the dashboard can display how many repos were processed.
+resource "google_bigquery_table" "env_drift_job_summary" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "env_drift_job_summary"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      SELECT
+        execution_id,
+        execution_ts,
+        COALESCE(environment, 'prod')            AS environment,
+        git_ref,
+        triggered_by,
+        status,
+        COALESCE(repos_total,    0)              AS repos_total,
+        COALESCE(repos_launched, 0)              AS repos_launched,
+        COALESCE(repos_success,  0)              AS repos_success,
+        COALESCE(repos_failed,   0)              AS repos_failed,
+        COALESCE(repos_total, 0)
+          - COALESCE(repos_launched, 0)          AS repos_skipped,
+        duration_seconds
+      FROM `${var.reporting_project_id}.devops_reports.executions`
+      WHERE report_type  = 'env_drift'
+        AND project_name = '_job_summary'
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY COALESCE(environment, 'prod')
+        ORDER BY execution_ts DESC
+      ) = 1
     EOT
     use_legacy_sql = false
   }
