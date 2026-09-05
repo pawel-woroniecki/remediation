@@ -259,6 +259,10 @@ resource "google_cloud_run_v2_job" "commit_drift" {
           name  = "SUBGROUP"
           value = var.gitlab_subgroup
         }
+        env {
+          name  = "EXCLUDE_REPOS"
+          value = "demo_*"
+        }
 
         resources {
           limits = {
@@ -317,6 +321,10 @@ resource "google_cloud_run_v2_job" "file_drift" {
         env {
           name  = "SUBGROUP"
           value = var.gitlab_subgroup
+        }
+        env {
+          name  = "EXCLUDE_REPOS"
+          value = "demo_*"
         }
 
         resources {
