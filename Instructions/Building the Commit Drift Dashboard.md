@@ -142,7 +142,84 @@ Three scorecard tiles at the top give a single-number total for the selected fil
 
 ---
 
-## Step 7 — Share
+## Step 7 — Add the commit staleness table
+
+This table answers the question *"how old are these waiting commits?"* — surfacing
+drift directions where unmerged commits have been sitting for weeks or months.
+
+### Prerequisites
+
+`terraform apply` must have been run after the `branch_drift_staleness` view was added
+to `BQ DS + Tables.tf`. Verify the view exists:
+
+```sql
+SELECT * FROM `tefde-gcp-fastoss-dev.devops_reports.branch_drift_staleness`
+ORDER BY days_oldest_waiting DESC LIMIT 5;
+```
+
+### Connect the data source
+
+1. In Looker Studio edit mode, click **Add data** (top toolbar).
+2. Choose **BigQuery → My Projects → `tefde-gcp-fastoss-dev` → `devops_reports` →
+   `branch_drift_staleness`**.
+3. Click **Add** → **Add to Report**.
+4. Name the data source `Commit Staleness`.
+
+> **"Enable date range parameters"** must be **unchecked** on the connector screen
+> (same rule as the Job Run Status dashboard — see
+> `Instructions/Building the Job Run Status Dashboard.md`).
+
+### Set field types
+
+In **Resource → Manage added data sources → pencil icon** on `Commit Staleness`:
+
+| Field | Type | Default Aggregation |
+|---|---|---|
+| `repo` | Text | None |
+| `drift_direction` | Text | None |
+| `run_date` | Date | None |
+| `oldest_commit_date` | Date & Time | None |
+| `newest_commit_date` | Date & Time | None |
+| `commits_waiting` | Number | Sum |
+| `days_oldest_waiting` | Number | Max |
+
+Click **Done → Close**.
+
+### Build the table
+
+1. **Insert → Table**.
+2. In the **Setup** panel, set all columns as **Dimensions** (no Metrics) — this ensures
+   the date range control can filter the table:
+   - **Dimensions:** `repo`, `drift_direction`, `days_oldest_waiting`,
+     `oldest_commit_date`, `newest_commit_date`, `commits_waiting`
+3. Set **Date range dimension** to `run_date`.
+4. **Sort:** `days_oldest_waiting` descending — stalest repos appear first.
+5. **Rows per page:** 50.
+
+### Add conditional formatting on `days_oldest_waiting`
+
+1. With the table selected → **Style** tab → scroll to **Conditional formatting**.
+2. Add two rules on the `days_oldest_waiting` dimension:
+
+| Condition | Format |
+|---|---|
+| Number **≥ 30** | Background `#FDECEA` (light red), text `#C62828` (dark red), **Bold** |
+| Number **≥ 7** | Background `#FFF8E1` (light amber), text `#E65100` (orange) |
+
+Rows where the oldest waiting commit is over a month old will appear in red; those
+over a week old in amber; recent commits are unformatted.
+
+### Interpretation
+
+| `drift_direction` | Meaning of a high `days_oldest_waiting` value |
+|---|---|
+| `test not in production` | Commits approved in test but blocked from prod — merge delay or freeze |
+| `production not in master` | Hotfixes applied to prod but not back-ported — risk of regression on next deploy |
+| `master not in test` | New development not promoted to test — pipeline stall |
+
+---
+
+## Step 8 — Share
 
 1. Click **Share** (top right).
 2. Add the team or Google Group.
@@ -169,6 +246,8 @@ need attention. The bar chart on the right mirrors the sort order visually.
 
 ## Data source field reference
 
+### `Commit Drift` data source (main KPI table)
+
 | Field | Type | Description |
 |---|---|---|
 | `execution_ts` | Date dimension | Run start timestamp — use as date range filter field |
@@ -187,6 +266,18 @@ need attention. The bar chart on the right mirrors the sort order visually.
 | `earliest_commit_date` | Timestamp | Date of the oldest drifted commit |
 | `latest_commit_date` | Timestamp | Date of the most recent drifted commit |
 
+### `Commit Staleness` data source (`branch_drift_staleness` view)
+
+| Field | Type | Description |
+|---|---|---|
+| `repo` | Dimension | GitLab project name |
+| `drift_direction` | Dimension | e.g. `test_not_in_production` |
+| `run_date` | Date dimension | Date of the most recent run for this repo/direction |
+| `commits_waiting` | Metric | Number of distinct commits in this direction |
+| `oldest_commit_date` | Timestamp | Author date of the oldest unmerged commit |
+| `newest_commit_date` | Timestamp | Author date of the most recent unmerged commit |
+| `days_oldest_waiting` | Metric | Days between `oldest_commit_date` and `run_date` — the staleness indicator |
+
 ---
 
 ## Related
@@ -198,5 +289,5 @@ need attention. The bar chart on the right mirrors the sort order visually.
   one-time GCP service account setup
 - `Instructions/Building the Management Dashboard.md` — executive red/green health grid
 - `TEF remediation/looker_sql/commit_drift_report.sql` — the SQL query used as data source
-- `TEF remediation/Terraform/BQ DS + Tables.tf` — `branch_drift_kpis` and
-  `branch_drift_evidence` table schema definitions
+- `TEF remediation/Terraform/BQ DS + Tables.tf` — `branch_drift_kpis`,
+  `branch_drift_evidence`, and `branch_drift_staleness` schema definitions
