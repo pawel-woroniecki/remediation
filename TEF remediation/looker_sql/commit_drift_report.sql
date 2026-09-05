@@ -30,7 +30,8 @@ WITH latest_exec AS (
   FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'commit_drift'
     AND status      = 'success'
-    AND DATE(execution_ts) BETWEEN @DS_START_DATE AND @DS_END_DATE
+    AND DATE(execution_ts) BETWEEN PARSE_DATE('%Y%m%d', @DS_START_DATE)
+                               AND PARSE_DATE('%Y%m%d', @DS_END_DATE)
   QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
 ),
 
