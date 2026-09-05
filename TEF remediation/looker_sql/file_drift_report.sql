@@ -19,23 +19,28 @@
  */
 
 -- ──────────────────────────────────────────────────────────────────────────────
--- KPI Summary — one row per repo × drift direction (latest successful run)
+-- KPI Summary — one row per repo × drift direction × run (last 90 days)
+-- In Looker Studio: use a Filter control (dropdown) on run_date to pick one day.
+-- "Enable date range parameters" must be UNCHECKED on this data source.
 -- ──────────────────────────────────────────────────────────────────────────────
 WITH latest_exec AS (
   SELECT
     execution_id,
     execution_ts,
+    DATE(execution_ts, 'Europe/Berlin') AS run_date,
     environment,
     status,
     triggered_by
   FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'file_drift'
     AND status      = 'success'
-  QUALIFY ROW_NUMBER() OVER (ORDER BY execution_ts DESC) = 1
+    AND execution_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
 ),
 
 kpi_summary AS (
   SELECT
+    e.execution_id,
+    e.run_date,
     e.execution_ts,
     e.environment,
     e.triggered_by,
@@ -89,6 +94,7 @@ evidence_agg AS (
 )
 
 SELECT
+  ks.run_date,
   ks.execution_ts,
   ks.environment,
   ks.triggered_by,
@@ -110,7 +116,8 @@ SELECT
   ea.latest_change_date
 FROM kpi_summary ks
 LEFT JOIN evidence_agg ea
-  ON  ea.repo        = ks.repo
+  ON  ea.execution_id = ks.execution_id
+  AND ea.repo        = ks.repo
   AND ea.discrepancy = CONCAT(
         REGEXP_EXTRACT(ks.right_branch, r'origin/(.+)'), '_not_in_',
         REGEXP_EXTRACT(ks.left_branch,  r'origin/(.+)')
