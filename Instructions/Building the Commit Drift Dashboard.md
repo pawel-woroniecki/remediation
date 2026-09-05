@@ -194,7 +194,7 @@ In **Resource → Manage added data sources → pencil icon** on `Commit Stalene
 |---|---|---|
 | `repo` | Text | None |
 | `drift_direction` | Text | None |
-| `run_date` | Date | None |
+| `snapshot_date` | Date | None |
 | `oldest_commit_date` | Date & Time | None |
 | `newest_commit_date` | Date & Time | None |
 | `commits_waiting` | Number | Sum |
@@ -297,7 +297,7 @@ need attention. The bar chart on the right mirrors the sort order visually.
 |---|---|---|
 | `repo` | Dimension | GitLab project name |
 | `drift_direction` | Dimension | e.g. `test_not_in_production` |
-| `run_date` | Date dimension | Date of the most recent run for this repo/direction |
+| `snapshot_date` | Date dimension | Date of the most recent run for this repo/direction |
 | `commits_waiting` | Metric | Number of distinct commits in this direction |
 | `oldest_commit_date` | Timestamp | Author date of the oldest unmerged commit |
 | `newest_commit_date` | Timestamp | Author date of the most recent unmerged commit |

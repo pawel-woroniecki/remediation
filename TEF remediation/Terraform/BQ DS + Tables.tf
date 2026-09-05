@@ -252,7 +252,7 @@ resource "google_bigquery_table" "branch_drift_staleness" {
       SELECT
         e.repo,
         e.discrepancy                                             AS drift_direction,
-        l.run_date,
+        l.run_date                                                AS snapshot_date,
         COUNT(DISTINCT e.commit_sha)                             AS commits_waiting,
         MIN(e.commit_date)                                       AS oldest_commit_date,
         MAX(e.commit_date)                                       AS newest_commit_date,
