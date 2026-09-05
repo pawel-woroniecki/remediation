@@ -229,6 +229,50 @@ resource "google_bigquery_table" "branch_drift_evidence" {
   clustering = ["repo", "discrepancy"]
 }
 
+# ---------------------------------------------------------------------------
+# Looker Studio view — commit staleness per repo × drift direction
+# ---------------------------------------------------------------------------
+# Shows, for the most recent run, how old the oldest unmerged commit is in
+# each drift direction. Use days_oldest_waiting to surface stale commits that
+# have been waiting to merge for weeks or months.
+resource "google_bigquery_table" "branch_drift_staleness" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "branch_drift_staleness"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      WITH latest_run AS (
+        SELECT repo, discrepancy, MAX(run_date) AS run_date
+        FROM `${var.reporting_project_id}.devops_reports.branch_drift_evidence`
+        WHERE drift_type = 'commit'
+        GROUP BY repo, discrepancy
+      )
+      SELECT
+        e.repo,
+        e.discrepancy                                             AS drift_direction,
+        l.run_date,
+        COUNT(DISTINCT e.commit_sha)                             AS commits_waiting,
+        MIN(e.commit_date)                                       AS oldest_commit_date,
+        MAX(e.commit_date)                                       AS newest_commit_date,
+        DATE_DIFF(
+          l.run_date,
+          DATE(MIN(e.commit_date), 'Europe/Berlin'),
+          DAY
+        )                                                        AS days_oldest_waiting
+      FROM `${var.reporting_project_id}.devops_reports.branch_drift_evidence` e
+      JOIN latest_run l
+        ON  e.repo        = l.repo
+        AND e.discrepancy = l.discrepancy
+        AND e.run_date    = l.run_date
+      WHERE e.drift_type = 'commit'
+      GROUP BY e.repo, e.discrepancy, l.run_date
+    EOT
+    use_legacy_sql = false
+  }
+}
+
 resource "google_bigquery_table" "env_drift_findings" {
   project             = var.reporting_project_id
   dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
