@@ -41,8 +41,11 @@ dates of those commits, for the most recent successful run.
 5. Paste the **main query** from `TEF remediation/looker_sql/commit_drift_report.sql` into
    the query box. Use only the first query block — stop before the `/* ---- */` comment
    separator that precedes the commented-out drill-through query.
-6. Name the data source `Commit Drift`.
-7. Click **Add** (top right) → **Add to Report**.
+6. **Leave "Enable date range parameters" unchecked.** The query uses a fixed 90-day
+   lookback window and does not use `@DS_START_DATE`/`@DS_END_DATE` parameters. Checking
+   this box would cause an error.
+7. Name the data source `Commit Drift`.
+8. Click **Add** (top right) → **Add to Report**.
 
 > **Which query to paste:** The file contains two query blocks. The active one starts with
 > `WITH latest_exec AS (` and ends with `ORDER BY ks.severity_sort, ks.unique_commits DESC, ...`.
@@ -58,7 +61,8 @@ dates of those commits, for the most recent successful run.
 
    | Field | Change to |
    |---|---|
-   | `execution_ts` | **Date & Time** — set as **Date range dimension** |
+   | `run_date` | **Date** (day-level) — this is the field used by the Run date dropdown filter |
+   | `execution_ts` | **Date & Time** |
    | `unique_commits` | **Number**, Aggregation: **Sum** |
    | `unique_files` | **Number**, Aggregation: **Sum** |
    | `distinct_authors` | **Number**, Aggregation: **Sum** |
@@ -102,18 +106,24 @@ dates of those commits, for the most recent successful run.
 
 Insert these four controls above the table and bar chart:
 
-### Filter 1 — Date range
+### Filter 1 — Run date
 
-1. **Insert → Date range control**.
-2. Set **Default date range** to **Last 7 days** (ensures a nightly run is always
-   visible by default — the commit drift job runs nightly, so "Today" may show no data
-   until the job completes).
-3. Bind to field `execution_ts`.
+1. **Insert → Filter control**.
+2. Field: `run_date`. Control type: **Drop-down list**. Label: `Run date`.
+3. The dropdown lists every date on which a successful commit drift run was recorded
+   (up to 90 days back). Selecting one date shows the snapshot from that run.
+4. Leaving the filter empty (no selection) shows all runs combined — useful to see
+   which repos appear across all recent runs, but not the normal usage.
 
-> **Shifting dates backwards:** The main KPI table and bar chart will show data for any
-> date range where the commit drift job ran. "No data" for a specific date is expected
-> and correct if no job ran that day. The **staleness table** (Step 7) is unaffected by
-> this control because it has no Date range dimension — it always shows the current state.
+> **Single-date behavior:** Because the SQL returns one result row per repo × direction
+> × run, picking a single date in this dropdown is equivalent to "show me the state
+> as of this run." There is no date range picker — Looker Studio's built-in Date Range
+> control would always show two calendar pickers (start + end), which is misleading
+> for a per-snapshot report. The dropdown is the correct control here.
+>
+> **"Enable date range parameters" must be UNCHECKED** on the `Commit Drift` data
+> source. The SQL no longer uses `@DS_START_DATE`/`@DS_END_DATE` parameters — it uses
+> a fixed 90-day lookback window so query size stays bounded.
 
 ### Filter 2 — Repository
 
@@ -264,7 +274,8 @@ need attention. The bar chart on the right mirrors the sort order visually.
 
 | Field | Type | Description |
 |---|---|---|
-| `execution_ts` | Date dimension | Run start timestamp — use as date range filter field |
+| `run_date` | Date dimension | Calendar date of the run (Europe/Berlin) — use as the Run date dropdown filter field |
+| `execution_ts` | Date & Time | Full run start timestamp |
 | `environment` | Dimension | GCP environment label |
 | `triggered_by` | Dimension | Email or identity that triggered the run |
 | `repo` | Dimension | GitLab project name |
