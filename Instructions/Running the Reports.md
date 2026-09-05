@@ -1,14 +1,18 @@
 # Running the DevOps Reports — End User Guide
 
-This document explains how the 4 DevOps governance reports run, how to trigger them manually,
-and how to change the automatic daily schedule.
+This document explains how the 4 DevOps governance reports run across 6 Cloud Run Jobs,
+how to trigger them manually, and how to change the automatic daily schedule.
 
-| # | Report | Cloud Run Job name |
-|---|---|---|
-| 1 | Orphan BigQuery datasets | `devops-reports-orphan-datasets` |
-| 2 | Environment vs code drift | `devops-reports-env-drift` |
-| 3 | Commit-based branch drift | `devops-reports-commit-drift` |
-| 4 | File-content branch drift | `devops-reports-file-drift` |
+| # | Report | Cloud Run Job name | Environment |
+|---|---|---|---|
+| 1 | Orphan BigQuery datasets | `devops-reports-orphan-datasets` | prod |
+| 2 | Environment vs code drift | `devops-reports-env-drift` | prod |
+| 3 | Commit-based branch drift | `devops-reports-commit-drift` | — (GitLab only) |
+| 4 | File-content branch drift | `devops-reports-file-drift` | — (GitLab only) |
+| 5 | Environment vs code drift | `devops-reports-env-drift-test` | test |
+| 6 | Environment vs code drift | `devops-reports-env-drift-dev` | dev |
+
+> Jobs 2, 5, and 6 run the same Environment Drift report against three separate GCP environments (prod, test, dev).
 
 All reports write their results to BigQuery (`devops_reports` dataset in
 `tefde-gcp-fastoss-dev`) and to CSV files in the GCS bucket
@@ -18,16 +22,18 @@ All reports write their results to BigQuery (`devops_reports` dataset in
 
 ## 1. Automatic (scheduled) runs
 
-All 4 reports run **automatically every day** — no action needed for routine reporting.
+All 6 Cloud Run Jobs run **automatically every day** — no action needed for routine reporting.
 
-| Report | Scheduler job name | Time (Europe/Berlin) |
+| Cloud Run Job | Scheduler trigger name | Time (Europe/Berlin) |
 |---|---|---|
-| Orphan BigQuery datasets | `devops-reports-orphan-datasets-trigger` | 05:00 |
-| Environment vs code drift | `devops-reports-env-drift-trigger` | 05:10 |
-| Commit-based branch drift | `devops-reports-commit-drift-trigger` | 05:20 |
-| File-content branch drift | `devops-reports-file-drift-trigger` | 05:30 |
+| `devops-reports-orphan-datasets` | `devops-reports-orphan-datasets-trigger` | 05:00 |
+| `devops-reports-env-drift` | `devops-reports-env-drift-trigger` | 05:10 |
+| `devops-reports-commit-drift` | `devops-reports-commit-drift-trigger` | 05:20 |
+| `devops-reports-file-drift` | `devops-reports-file-drift-trigger` | 05:30 |
+| `devops-reports-env-drift-test` | `devops-reports-env-drift-test-trigger` | 05:40 |
+| `devops-reports-env-drift-dev` | `devops-reports-env-drift-dev-trigger` | 05:50 |
 
-Times are staggered 10 minutes apart so the 4 jobs don't all clone the same repos at once.
+Times are staggered 10 minutes apart so the jobs don't all clone the same repos at once.
 
 ### How it works
 
@@ -43,8 +49,8 @@ gcloud scheduler jobs describe devops-reports-orphan-datasets-trigger \
   --location=europe-west3
 ```
 
-Look for `lastAttemptTime` / `scheduleTime` in the output. Repeat for the other 3 jobs by
-substituting the job name.
+Look for `lastAttemptTime` / `scheduleTime` in the output. Repeat for the other 5 triggers by
+substituting the trigger name.
 
 ### Running a scheduled job immediately (without waiting for its time)
 
@@ -81,7 +87,7 @@ gcloud run jobs execute devops-reports-commit-drift \
   --region=europe-west3
 ```
 
-Replace the job name with any of the 4 from the table above. This is the most reliable way to
+Replace the job name with any of the 6 from the table above. This is the most reliable way to
 trigger a report manually, since it works from any machine with `gcloud` and the right
 permissions — no network restrictions apply.
 
@@ -100,6 +106,8 @@ locals {
   schedule_env_drift       = "10 5 * * *"  # 05:10
   schedule_commit_drift    = "20 5 * * *"  # 05:20
   schedule_file_drift      = "30 5 * * *"  # 05:30
+  schedule_env_drift_test  = "40 5 * * *"  # 05:40
+  schedule_env_drift_dev   = "50 5 * * *"  # 05:50
 }
 ```
 

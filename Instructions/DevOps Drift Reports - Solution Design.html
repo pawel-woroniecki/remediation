@@ -317,8 +317,8 @@
 <div class="page-header">
   <h1>DevOps Drift Reports — Solution Design</h1>
   <div class="meta-row">
-    <span class="badge">&#128197; Last updated: August 2026</span>
-    <span class="badge">&#9989; Version: 1.0</span>
+    <span class="badge">&#128197; Last updated: September 2026</span>
+    <span class="badge">&#9989; Version: 1.1</span>
     <span class="badge">&#127968; Telefónica Germany / Capgemini</span>
     <span class="badge">&#128274; Internal</span>
   </div>
@@ -405,7 +405,7 @@ flowchart LR
     GCP_D["GCP dev\ntefde-gcp-fastoss-dev-gke\nBQ schema"]
     BQ[("BigQuery\ntefde-gcp-fastoss-dev\ndevops_reports dataset")]
     GCS[("GCS\nReport files\n.md / .csv")]
-    LS["Looker Studio\n6 dashboards"]
+    LS["Looker Studio\n8 dashboards"]
 
     CS -->|"HTTP POST RunJob"| CRJ
     CRJ -->|"git clone"| GL
@@ -448,7 +448,7 @@ flowchart LR
         <div class="comp-card">
           <div class="comp-type">Visualisation</div>
           <div class="comp-name">Looker Studio</div>
-          <p>Six dashboards built on top of BigQuery views. Management dashboard, per-environment env drift, branch drift, file drift, orphan datasets.</p>
+          <p>Eight dashboards built on top of BigQuery views: Management (health grid), per-environment env drift (prod / test / dev), commit drift with staleness table, file drift, job run status, and orphan datasets.</p>
         </div>
         <div class="comp-card">
           <div class="comp-type">IaC</div>
@@ -526,7 +526,7 @@ flowchart TD
           <span class="pill amber">Branch comparison</span>
         </div>
         <div class="report-card-body">
-          <p>Finds commits that exist in one branch but are absent from another. This reveals cherry-picks that were never back-merged, hotfixes applied directly to production, or test-environment changes never promoted to master.</p>
+          <p>Finds commits that exist in one branch but are absent from another. This reveals cherry-picks that were never back-merged, hotfixes applied directly to production, or test-environment changes never promoted to master. The companion <strong>Commit Staleness</strong> table (powered by the <code>branch_drift_staleness</code> BigQuery view) shows how many days the oldest unmerged commit has been waiting in each direction, surfacing drift that has been accumulating for weeks or months.</p>
           <div class="diagram-card">
             <div class="diagram-label">commit_drift flow</div>
             <div class="mermaid">
@@ -638,16 +638,16 @@ flowchart TD
               <td><code>env_drift_summary</code> view<br>filter: environment = dev</td>
             </tr>
             <tr>
-              <td><strong>Branch Drift (Commit)</strong></td>
+              <td><strong>Commit Drift</strong><br><em>incl. Staleness table</em></td>
               <td>DEV leads, Release managers</td>
-              <td>Which branches are diverging? Are there commits in production that are missing from master?</td>
-              <td>Custom query on <code>branch_drift_kpis</code></td>
+              <td>Which branches are diverging? Are there commits in production that are missing from master? How long have unmerged commits been waiting? Use the <em>Run date</em> dropdown to view any historical snapshot.</td>
+              <td>Custom query on <code>branch_drift_kpis</code> + <code>branch_drift_evidence</code>;<br><code>branch_drift_staleness</code> view (staleness table)</td>
             </tr>
             <tr>
               <td><strong>File Drift</strong></td>
               <td>DEV leads</td>
-              <td>Which files differ between branches? How many additions, deletions, modifications?</td>
-              <td>Custom query on <code>branch_drift_kpis</code></td>
+              <td>Which files differ between branches? How many additions, deletions, modifications? Use the <em>Run date</em> dropdown to view any historical snapshot.</td>
+              <td>Custom query on <code>branch_drift_kpis</code> + <code>branch_drift_evidence</code></td>
             </tr>
             <tr>
               <td><strong>Orphan Datasets</strong></td>
@@ -656,10 +656,10 @@ flowchart TD
               <td>Custom queries on <code>orphan_datasets</code></td>
             </tr>
             <tr>
-              <td><strong>Job Status (Overview)</strong></td>
+              <td><strong>Job Run Status</strong></td>
               <td>OPS</td>
-              <td>Did all six jobs run successfully today? Which failed and when?</td>
-              <td>Custom query on <code>executions</code></td>
+              <td>Did all six jobs run successfully today? How many repos were processed, succeeded, failed, or skipped? How long did each run take?</td>
+              <td><code>env_drift_job_summary</code> view + custom query on <code>executions</code></td>
             </tr>
           </tbody>
         </table>
@@ -834,7 +834,7 @@ flowchart TD
         <span class="callout-icon">&#128161;</span>
         <div class="callout-body">
           <strong>Rebuilding the Docker image</strong>
-          <p>After any Python script change, rebuild the Docker image and push it to Artifact Registry (<code>europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-runner</code>). The Cloud Run Jobs always pull the <code>latest</code> tag &mdash; no Terraform apply is needed for image-only changes.</p>
+          <p>After any Python script change, rebuild the Docker image and push it to Artifact Registry (<code>europe-west3-docker.pkg.dev/tefde-gcp-fastoss-dev-gke/devops-reports/devops-reports-runner</code>). Then run <code>terraform apply</code> to update the Cloud Run Jobs &mdash; Cloud Run resolves image tags to a specific digest at deploy time, so a new push alone does not take effect until the job definition is updated. See <code>Instructions/Building and Releasing a New Image Version.md</code> for the full two-step release process.</p>
         </div>
       </div>
       <div class="callout warning" style="margin-top:12px;">

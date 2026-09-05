@@ -5,7 +5,7 @@ Artifact Registry, and — the step people most often forget — **explicitly re
 so it actually starts using the new image.
 
 There is one image in this project: `devops-reports`, built from `Dockerfile.python`
-(report scripts and `entrypoint.sh`), used by all 4 Cloud Run Jobs.
+(report scripts and `entrypoint.sh`), used by all 6 Cloud Run Jobs.
 
 Change anything in the report scripts (`git_branches_gap/`, `git_gcp_code_vs_environment_drift/`,
 `bigquery_orphan_datasets/`, `clone_all_groups_repo/`, `entrypoint.sh`, `Dockerfile.python`) →
