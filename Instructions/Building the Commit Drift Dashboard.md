@@ -105,8 +105,15 @@ Insert these four controls above the table and bar chart:
 ### Filter 1 — Date range
 
 1. **Insert → Date range control**.
-2. Set **Default date range** to **Yesterday** (shows the most recent run by default).
+2. Set **Default date range** to **Last 7 days** (ensures a nightly run is always
+   visible by default — the commit drift job runs nightly, so "Today" may show no data
+   until the job completes).
 3. Bind to field `execution_ts`.
+
+> **Shifting dates backwards:** The main KPI table and bar chart will show data for any
+> date range where the commit drift job ran. "No data" for a specific date is expected
+> and correct if no job ran that day. The **staleness table** (Step 7) is unaffected by
+> this control because it has no Date range dimension — it always shows the current state.
 
 ### Filter 2 — Repository
 
@@ -188,13 +195,20 @@ Click **Done → Close**.
 ### Build the table
 
 1. **Insert → Table**.
-2. In the **Setup** panel, set all columns as **Dimensions** (no Metrics) — this ensures
-   the date range control can filter the table:
+2. In the **Setup** panel, set all columns as **Dimensions** (no Metrics):
    - **Dimensions:** `repo`, `drift_direction`, `days_oldest_waiting`,
      `oldest_commit_date`, `newest_commit_date`, `commits_waiting`
-3. Set **Date range dimension** to `run_date`.
+3. **Do NOT set a Date range dimension** — leave it blank/None.
 4. **Sort:** `days_oldest_waiting` descending — stalest repos appear first.
 5. **Rows per page:** 50.
+
+> **Why no Date range dimension?** The `branch_drift_staleness` view always computes the
+> globally latest run per repo × direction (`MAX(run_date)`). It is designed to answer
+> *"which repos have stale commits right now?"* — not *"what was the state on date X?"*.
+> If you set a Date range dimension and filter to a past date, the table returns almost
+> no rows (only repos whose last-ever run was on that exact date). Leaving the Date range
+> dimension blank means the page-level date control is ignored for this table and it
+> always shows the current state, which is the correct behaviour.
 
 ### Add conditional formatting on `days_oldest_waiting`
 
