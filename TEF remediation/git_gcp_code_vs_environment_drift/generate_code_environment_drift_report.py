@@ -784,9 +784,26 @@ def fetch_bigquery_inventory(
                 time.sleep(30)
         return []  # unreachable
 
+    # Validate each dataset actually exists before querying INFORMATION_SCHEMA.
+    # The Dataset API reflects true state faster than the INFORMATION_SCHEMA metadata
+    # cache, which can lag after a dataset is deleted and return ghost rows that
+    # produce spurious only_in_bq findings.
+    live_datasets: list[str] = []
+    for ds in datasets:
+        try:
+            bq.get_dataset(ds)
+            live_datasets.append(ds)
+        except NotFound:
+            log("WARNING",
+                "Dataset not found via Dataset API — excluding from INFORMATION_SCHEMA scan",
+                project=project_id, dataset=ds)
+    datasets = live_datasets
+
     # Use region-level INFORMATION_SCHEMA so all datasets are covered by 4 queries
     # total instead of 4×N per-dataset queries. Run in parallel (4 workers); each
     # query retries up to 10× on transient resourcesExceeded errors.
+    if not datasets:
+        return inventory
     ds_filter = ", ".join(f"'{ds}'" for ds in datasets)
     r = f"`{project_id}`.`region-europe-west3`.INFORMATION_SCHEMA"
     region_queries = {
