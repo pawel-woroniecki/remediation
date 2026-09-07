@@ -586,8 +586,13 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             entry.sql_fragments.append(sql)
             entry.multi_statement = len(entry.files) > 1
             add_cols, drop_cols, rename_pairs, type_changes = extract_alter_operations(sql)
+            # Append in intra-file order: adds, drops, renames, type_changes.
+            # Keeping this grouping preserves "ADD col, then RENAME col" sequences
+            # within a single file (e.g. add a staging column, then rename it into place).
             entry.alter_col_ops.extend(('add', c, t) for c, t in add_cols.items())
             entry.alter_col_ops.extend(('drop', c) for c in drop_cols)
+            entry.alter_col_ops.extend(('rename', old, new) for old, new in rename_pairs)
+            entry.alter_col_ops.extend(('type_change', c, t) for c, t in type_changes.items())
             entry.rename_pairs.extend(rename_pairs)
             entry.type_changes.update(type_changes)
             if ds and not entry.dataset:
@@ -608,23 +613,23 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             entry.object_name = new_name
             inventory[new_name] = entry
 
-    # Apply column transforms from ALTER TABLE files in the correct order:
-    # 1. RENAME COLUMN first — subsequent ops reference the new name.
-    # 2. ALTER col ops (ADD / DROP) replayed in file-processing order — preserves
-    #    the sequence "v1 drops column X, v2 re-adds column X" correctly.
-    # 3. SET DATA TYPE last — operates on the final post-add/drop column set.
+    # Replay all ALTER TABLE column operations in the order they were collected:
+    # within each file — adds, drops, renames, type_changes; across files — in
+    # version order.  A single pass handles complex multi-file sequences such as
+    # "v1: ADD staging_col, RENAME old→deprecated, RENAME staging_col→old;
+    #  v2: DROP deprecated".
     for entry in inventory.values():
-        for old, new in entry.rename_pairs:
-            if old in entry.columns:
-                entry.columns[new] = entry.columns.pop(old)
         for op in entry.alter_col_ops:
             if op[0] == 'add':
                 entry.columns[op[1]] = op[2]
-            else:  # 'drop'
+            elif op[0] == 'drop':
                 entry.columns.pop(op[1], None)
-        for col, new_type in entry.type_changes.items():
-            if col in entry.columns:
-                entry.columns[col] = new_type
+            elif op[0] == 'rename':
+                if op[1] in entry.columns:
+                    entry.columns[op[2]] = entry.columns.pop(op[1])
+            elif op[0] == 'type_change':
+                if op[1] in entry.columns:
+                    entry.columns[op[1]] = op[2]
 
     return inventory, renamed_away_names
 
