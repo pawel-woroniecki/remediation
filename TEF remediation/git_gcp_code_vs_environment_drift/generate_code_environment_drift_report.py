@@ -489,17 +489,24 @@ def extract_alter_operations(
 
 
 def _sql_version_key(path: Path) -> tuple:
-    """Sort key for DDL SQL files: (parent_dir, version_number, filename).
+    """Sort key for DDL SQL files: (version_number, parent_dir, filename).
 
-    Base files with no _vN suffix get version 0 and always sort before versioned
-    files.  Versioned files sort in ascending numeric order (1, 2, 3 … 10, 11 …)
-    rather than lexicographically.  This neutralises filename typos that shift a
-    _vN file into an unexpected lexicographic position (e.g. celll…_v3.sql
-    sorting before cellstatus…_v2.sql because 'l' < 's'), which would otherwise
-    cause the base file to incorrectly supersede a later versioned DDL.
+    Version number is the primary key so that unversioned files (version 0) from
+    all directories — including dml/ migration scripts — are processed before any
+    _v1 files, which are processed before any _v2 files, and so on.  This ensures
+    that a dml/ ALTER TABLE that adds columns is applied before a later _v2 DDL
+    file that drops some of those columns, matching the order they were run in BQ.
+
+    Within the same version group, files sort by parent directory then filename,
+    so ddl/ objects sort before dml/ files (alphabetically 'd' < 'm'), meaning a
+    CREATE TABLE base file is always processed before any same-version migration.
+
+    Versioned files sort in ascending numeric order (1, 2, 3 … 10, 11 …) rather
+    than lexicographically, neutralising filename typos that shift a _vN file into
+    an unexpected position.
     """
     m = re.search(r"_v(\d+)\.sql$", path.name, re.IGNORECASE)
-    return (path.parent, int(m.group(1)) if m else 0, path.name)
+    return (int(m.group(1)) if m else 0, path.parent, path.name)
 
 
 def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObject], set[str]]:
