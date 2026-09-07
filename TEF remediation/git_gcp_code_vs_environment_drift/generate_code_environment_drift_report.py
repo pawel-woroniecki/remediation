@@ -602,14 +602,16 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             entry.object_name = new_name
             inventory[new_name] = entry
 
-    # Apply DROP COLUMN, RENAME COLUMN, and SET DATA TYPE transformations from ALTER files.
-    # Order matters: renames first, then type changes (a column may be renamed and then retyped).
+    # Apply RENAME COLUMN, DROP COLUMN, and SET DATA TYPE transformations from ALTER files.
+    # Order matters: renames first so that a subsequent DROP or SET DATA TYPE on the new
+    # name is resolved correctly (e.g. RENAME SpectrumClass→zzz_deprecated_SpectrumClass
+    # in v1 followed by DROP zzz_deprecated_SpectrumClass in v2).
     for entry in inventory.values():
-        for col in entry.drop_cols:
-            entry.columns.pop(col, None)
         for old, new in entry.rename_pairs:
             if old in entry.columns:
                 entry.columns[new] = entry.columns.pop(old)
+        for col in entry.drop_cols:
+            entry.columns.pop(col, None)
         for col, new_type in entry.type_changes.items():
             if col in entry.columns:
                 entry.columns[col] = new_type
