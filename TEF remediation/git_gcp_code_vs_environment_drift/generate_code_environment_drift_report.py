@@ -50,6 +50,12 @@ class SourceBqObject:
     rename_pairs: list[tuple[str, str]] = field(default_factory=list)
     type_changes: dict[str, str] = field(default_factory=dict)
     is_ctas: bool = False
+    # Ordered ADD/DROP column operations from ALTER TABLE files.
+    # Each entry is ('add', col_name, data_type) or ('drop', col_name).
+    # Stored in file-processing order so that a v1 DROP followed by a v2 ADD
+    # of the same column is replayed correctly (v1 drop is a no-op on the base
+    # columns, v2 add then adds the column).
+    alter_col_ops: list[tuple] = field(default_factory=list)
 
 
 def default_gcloud_path() -> str:
@@ -580,8 +586,8 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             entry.sql_fragments.append(sql)
             entry.multi_statement = len(entry.files) > 1
             add_cols, drop_cols, rename_pairs, type_changes = extract_alter_operations(sql)
-            entry.columns.update(add_cols)
-            entry.drop_cols.extend(drop_cols)
+            entry.alter_col_ops.extend(('add', c, t) for c, t in add_cols.items())
+            entry.alter_col_ops.extend(('drop', c) for c in drop_cols)
             entry.rename_pairs.extend(rename_pairs)
             entry.type_changes.update(type_changes)
             if ds and not entry.dataset:
@@ -602,16 +608,20 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             entry.object_name = new_name
             inventory[new_name] = entry
 
-    # Apply RENAME COLUMN, DROP COLUMN, and SET DATA TYPE transformations from ALTER files.
-    # Order matters: renames first so that a subsequent DROP or SET DATA TYPE on the new
-    # name is resolved correctly (e.g. RENAME SpectrumClass→zzz_deprecated_SpectrumClass
-    # in v1 followed by DROP zzz_deprecated_SpectrumClass in v2).
+    # Apply column transforms from ALTER TABLE files in the correct order:
+    # 1. RENAME COLUMN first — subsequent ops reference the new name.
+    # 2. ALTER col ops (ADD / DROP) replayed in file-processing order — preserves
+    #    the sequence "v1 drops column X, v2 re-adds column X" correctly.
+    # 3. SET DATA TYPE last — operates on the final post-add/drop column set.
     for entry in inventory.values():
         for old, new in entry.rename_pairs:
             if old in entry.columns:
                 entry.columns[new] = entry.columns.pop(old)
-        for col in entry.drop_cols:
-            entry.columns.pop(col, None)
+        for op in entry.alter_col_ops:
+            if op[0] == 'add':
+                entry.columns[op[1]] = op[2]
+            else:  # 'drop'
+                entry.columns.pop(op[1], None)
         for col, new_type in entry.type_changes.items():
             if col in entry.columns:
                 entry.columns[col] = new_type
