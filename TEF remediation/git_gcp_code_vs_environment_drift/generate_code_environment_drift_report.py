@@ -542,8 +542,17 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             sql, re.IGNORECASE,
         ))
         for dataset, object_name, object_type in targets:
+            # If this unqualified name already exists under a different dataset, promote
+            # both entries to qualified "dataset.name" keys so they remain separate and
+            # don't have their column definitions merged into a single wrong entry.
+            inventory_key = object_name
+            if dataset:
+                _existing = inventory.get(object_name)
+                if _existing is not None and _existing.dataset and _existing.dataset != dataset:
+                    inventory[f"{_existing.dataset}.{object_name}"] = inventory.pop(object_name)
+                    inventory_key = f"{dataset}.{object_name}"
             entry = inventory.setdefault(
-                object_name,
+                inventory_key,
                 SourceBqObject(object_name=object_name, dataset=dataset, object_type=object_type),
             )
             if rel_path not in entry.files:
@@ -584,8 +593,15 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
                 continue
             ds = alter_match.group("dataset")
             obj = alter_match.group("object")
+            # Same cross-dataset collision guard as for CREATE targets.
+            _alter_key = obj
+            if ds:
+                _existing = inventory.get(obj)
+                if _existing is not None and _existing.dataset and _existing.dataset != ds:
+                    inventory[f"{_existing.dataset}.{obj}"] = inventory.pop(obj)
+                    _alter_key = f"{ds}.{obj}"
             entry = inventory.setdefault(
-                obj,
+                _alter_key,
                 SourceBqObject(object_name=obj, dataset=ds, object_type="table"),
             )
             if rel_path not in entry.files:
@@ -1079,6 +1095,16 @@ def compare_bigquery(
         actual_names.add(_uname)
         actual_bq_by_name[_uname].append(_entry)
 
+    # source_bq may contain qualified "dataset.name" keys when multiple datasets share
+    # the same table name.  Build unqualified-name helpers so set operations are
+    # consistent regardless of whether source keys are qualified or unqualified.
+    source_unames: set[str] = set()
+    source_by_uname: dict[str, list[str]] = defaultdict(list)
+    for _sk in source_bq:
+        _uname = _sk.split(".", 1)[1] if "." in _sk else _sk
+        source_unames.add(_uname)
+        source_by_uname[_uname].append(_sk)
+
     deployable_dbt_names = {
         name for name, model in source_dbt.items()
         if model.get("materialized") != "ephemeral"
@@ -1094,7 +1120,7 @@ def compare_bigquery(
             and name not in actual_names
         )
     }
-    expected_names = set(source_bq) | deployable_dbt_names | (dbt_snapshot_names or set())
+    expected_names = source_unames | deployable_dbt_names | (dbt_snapshot_names or set())
 
     for object_name in sorted((actual_names - expected_names) - renamed_away_names):
         if object_name.lower().startswith("merge_"):
@@ -1122,13 +1148,13 @@ def compare_bigquery(
         # After BQ auto-drops them the DDL snapshot is intentionally stale — suppress.
         if "deprecated" in object_name.lower():
             continue
-        source_kind = "bq" if object_name in source_bq else "dbt_model"
+        source_kind = "bq" if object_name in source_unames else "dbt_model"
         details = "Object exists in the selected source snapshot but not in the selected GCP dataset inventory."
         findings.append(
             {
                 "area": "bigquery",
                 "object_name": object_name,
-                "dataset": source_bq.get(object_name).dataset if object_name in source_bq else None,
+                "dataset": source_bq[source_by_uname[object_name][0]].dataset if object_name in source_unames else None,
                 "status": "only_in_source",
                 "severity": "medium",
                 "source_technology": source_kind,
@@ -1136,93 +1162,127 @@ def compare_bigquery(
             }
         )
 
-    for object_name in sorted(set(source_bq) & actual_names):
-        source = source_bq[object_name]
-        # Prefer the dataset the source file declares; fall back to first match.
-        if source.dataset:
-            actual = actual_bq.get(f"{source.dataset}.{object_name}") or actual_bq_by_name[object_name][0]
-        else:
-            actual = actual_bq_by_name[object_name][0]
-        source_type = canonical_object_type(source.object_type)
-        actual_type = canonical_object_type(str(actual.get("object_type", "")))
-        if source_type not in {"unknown", "", actual_type}:
-            findings.append(
-                {
-                    "area": "bigquery",
-                    "object_name": object_name,
-                    "dataset": actual.get("dataset"),
-                    "status": "type_mismatch",
-                    "severity": "high",
-                    "source_technology": source.source_kind,
-                    "details": (
-                        f"Source type={source.object_type}, "
-                        f"selected GCP object type={actual.get('object_type')}."
-                    ),
-                }
-            )
-
-        # CTAS tables have no explicit column definitions in source DDL — skip schema
-        # comparison and fall through to body comparison below.
-        if source.columns and actual.get("columns") and not source.is_ctas:
-            actual_columns = actual["columns"]
-            missing_in_prod = sorted(set(source.columns) - set(actual_columns))
-            extra_in_prod = sorted(set(actual_columns) - set(source.columns))
-            type_mismatch = sorted(
-                name
-                for name in set(source.columns) & set(actual_columns)
-                if canonical_bq_data_type(source.columns[name]) != canonical_bq_data_type(str(actual_columns[name]))
-            )
-            if missing_in_prod or extra_in_prod or type_mismatch:
+    for object_name in sorted(source_unames & actual_names):
+        # Iterate over every source entry for this unqualified name (usually one, but may be
+        # multiple when the same table name exists in different datasets and source_bq uses
+        # qualified keys to keep them separate).
+        for _sk in source_by_uname[object_name]:
+            source = source_bq[_sk]
+            # Qualified source key: look up the exact dataset in actual_bq directly.
+            if "." in _sk:
+                actual = actual_bq.get(_sk) or actual_bq_by_name[object_name][0]
+            elif source.dataset:
+                actual = actual_bq.get(f"{source.dataset}.{object_name}") or actual_bq_by_name[object_name][0]
+            else:
+                actual = actual_bq_by_name[object_name][0]
+            source_type = canonical_object_type(source.object_type)
+            actual_type = canonical_object_type(str(actual.get("object_type", "")))
+            if source_type not in {"unknown", "", actual_type}:
                 findings.append(
                     {
                         "area": "bigquery",
                         "object_name": object_name,
                         "dataset": actual.get("dataset"),
-                        "status": "schema_mismatch",
+                        "status": "type_mismatch",
                         "severity": "high",
                         "source_technology": source.source_kind,
                         "details": (
-                            f"missing_in_prod={missing_in_prod}; extra_in_prod={extra_in_prod}; "
-                            f"type_mismatch={type_mismatch}"
+                            f"Source type={source.object_type}, "
+                            f"selected GCP object type={actual.get('object_type')}."
                         ),
                     }
                 )
 
-        if source.object_type in {"view", "materialized_view"}:
-            # For plain views, BQ returns the SELECT body only via view_definition.
-            # For views with column-level OPTIONS (inline descriptions), BQ returns the
-            # full CREATE VIEW ... AS header. Strip the header from both sides to normalize.
-            source_sql = normalize_sql(
-                strip_create_as_header(
-                    strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id)
+            # CTAS tables have no explicit column definitions in source DDL — skip schema
+            # comparison and fall through to body comparison below.
+            if source.columns and actual.get("columns") and not source.is_ctas:
+                actual_columns = actual["columns"]
+                missing_in_prod = sorted(set(source.columns) - set(actual_columns))
+                extra_in_prod = sorted(set(actual_columns) - set(source.columns))
+                type_mismatch = sorted(
+                    name
+                    for name in set(source.columns) & set(actual_columns)
+                    if canonical_bq_data_type(source.columns[name]) != canonical_bq_data_type(str(actual_columns[name]))
                 )
-            )
-            actual_sql = normalize_sql(
-                strip_create_as_header(
-                    strip_redundant_project_qualifiers(actual.get("view_query") or actual.get("ddl") or "", project_id)
-                )
-            )
-            if actual_sql and source_sql and source_sql != actual_sql:
-                # For objects defined across multiple source files (e.g. a base file and
-                # a FM_DTM_1h_v1.sql supersession), also check each fragment individually.
-                # If any single fragment matches GCP the latest deployed version is already
-                # in source — the joined sql_fragments just produced a non-matching string.
-                frag_normalized = [
-                    normalize_sql(
-                        strip_create_as_header(
-                            strip_redundant_project_qualifiers(frag, project_id)
-                        )
+                if missing_in_prod or extra_in_prod or type_mismatch:
+                    findings.append(
+                        {
+                            "area": "bigquery",
+                            "object_name": object_name,
+                            "dataset": actual.get("dataset"),
+                            "status": "schema_mismatch",
+                            "severity": "high",
+                            "source_technology": source.source_kind,
+                            "details": (
+                                f"missing_in_prod={missing_in_prod}; extra_in_prod={extra_in_prod}; "
+                                f"type_mismatch={type_mismatch}"
+                            ),
+                        }
                     )
-                    for frag in source.sql_fragments
-                ]
-                fragment_match = source.multi_statement and any(
-                    fn == actual_sql for fn in frag_normalized
+
+            if source.object_type in {"view", "materialized_view"}:
+                # For plain views, BQ returns the SELECT body only via view_definition.
+                # For views with column-level OPTIONS (inline descriptions), BQ returns the
+                # full CREATE VIEW ... AS header. Strip the header from both sides to normalize.
+                source_sql = normalize_sql(
+                    strip_create_as_header(
+                        strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id)
+                    )
                 )
-                # Suppress when source is a bare SELECT * FROM <table> — GCP may store
-                # the expanded column list, making string comparison fail even though
-                # the definitions are semantically equivalent.
-                select_star_match = bool(_SELECT_STAR_VIEW_RE.match(source_sql.strip()))
-                if not fragment_match and not select_star_match:
+                actual_sql = normalize_sql(
+                    strip_create_as_header(
+                        strip_redundant_project_qualifiers(actual.get("view_query") or actual.get("ddl") or "", project_id)
+                    )
+                )
+                if actual_sql and source_sql and source_sql != actual_sql:
+                    # For objects defined across multiple source files (e.g. a base file and
+                    # a FM_DTM_1h_v1.sql supersession), also check each fragment individually.
+                    # If any single fragment matches GCP the latest deployed version is already
+                    # in source — the joined sql_fragments just produced a non-matching string.
+                    frag_normalized = [
+                        normalize_sql(
+                            strip_create_as_header(
+                                strip_redundant_project_qualifiers(frag, project_id)
+                            )
+                        )
+                        for frag in source.sql_fragments
+                    ]
+                    fragment_match = source.multi_statement and any(
+                        fn == actual_sql for fn in frag_normalized
+                    )
+                    # Suppress when source is a bare SELECT * FROM <table> — GCP may store
+                    # the expanded column list, making string comparison fail even though
+                    # the definitions are semantically equivalent.
+                    select_star_match = bool(_SELECT_STAR_VIEW_RE.match(source_sql.strip()))
+                    if not fragment_match and not select_star_match:
+                        findings.append(
+                            {
+                                "area": "bigquery",
+                                "object_name": object_name,
+                                "dataset": actual.get("dataset"),
+                                "status": "definition_mismatch",
+                                "severity": "high",
+                                "source_technology": source.source_kind,
+                                "details": (
+                                    "Source view definition and selected GCP view definition differ after normalization."
+                                ),
+                            }
+                        )
+
+            if source.object_type == "table" and source.is_ctas:
+                # GCP INFORMATION_SCHEMA.TABLES.ddl includes the full CTAS DDL with header.
+                # Strip the header from both sides so comparison is body-only.
+                source_sql = normalize_sql(
+                    strip_create_as_header(
+                        strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id)
+                    )
+                )
+                actual_sql = normalize_sql(
+                    strip_create_as_header(
+                        strip_redundant_project_qualifiers(actual.get("ddl") or "", project_id)
+                    )
+                )
+                if actual_sql and source_sql and source_sql != actual_sql:
                     findings.append(
                         {
                             "area": "bigquery",
@@ -1231,37 +1291,9 @@ def compare_bigquery(
                             "status": "definition_mismatch",
                             "severity": "high",
                             "source_technology": source.source_kind,
-                            "details": (
-                                "Source view definition and selected GCP view definition differ after normalization."
-                            ),
+                            "details": "Source CTAS body and GCP CTAS body differ after normalization.",
                         }
                     )
-
-        if source.object_type == "table" and source.is_ctas:
-            # GCP INFORMATION_SCHEMA.TABLES.ddl includes the full CTAS DDL with header.
-            # Strip the header from both sides so comparison is body-only.
-            source_sql = normalize_sql(
-                strip_create_as_header(
-                    strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id)
-                )
-            )
-            actual_sql = normalize_sql(
-                strip_create_as_header(
-                    strip_redundant_project_qualifiers(actual.get("ddl") or "", project_id)
-                )
-            )
-            if actual_sql and source_sql and source_sql != actual_sql:
-                findings.append(
-                    {
-                        "area": "bigquery",
-                        "object_name": object_name,
-                        "dataset": actual.get("dataset"),
-                        "status": "definition_mismatch",
-                        "severity": "high",
-                        "source_technology": source.source_kind,
-                        "details": "Source CTAS body and GCP CTAS body differ after normalization.",
-                    }
-                )
     return findings
 
 
