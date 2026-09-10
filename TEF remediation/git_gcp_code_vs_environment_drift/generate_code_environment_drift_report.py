@@ -352,8 +352,10 @@ def apply_substitutions(snapshot_dir: Path, replacements: dict[str, str]) -> Non
 # including optional column-description blocks, OPTIONS clauses, and IF NOT EXISTS.
 # The lookahead also allows ( to handle bodies wrapped in parentheses:
 #   CREATE VIEW … AS (SELECT …)  — BQ INFORMATION_SCHEMA returns the body without parens.
+# Leading /* */ block comments or -- line comments (e.g. change-log blocks) before the
+# CREATE keyword are also consumed so the ^ anchor still matches.
 _CREATE_AS_HEADER_RE = re.compile(
-    r"^\s*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+.*?\bas\s+(?=\(|select\b|with\b|--)",
+    r"^\s*(?:/\*.*?\*/\s*|--[^\n]*\n\s*)*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+.*?\bas\s+(?=\(|select\b|with\b|--)",
     re.IGNORECASE | re.DOTALL,
 )
 
