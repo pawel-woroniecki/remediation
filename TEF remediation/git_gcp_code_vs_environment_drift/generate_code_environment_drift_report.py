@@ -350,12 +350,15 @@ def apply_substitutions(snapshot_dir: Path, replacements: dict[str, str]) -> Non
 
 # Strips the full CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE … AS header,
 # including optional column-description blocks, OPTIONS clauses, and IF NOT EXISTS.
-# The lookahead also allows ( to handle bodies wrapped in parentheses:
-#   CREATE VIEW … AS (SELECT …)  — BQ INFORMATION_SCHEMA returns the body without parens.
 # Leading /* */ block comments or -- line comments (e.g. change-log blocks) before the
 # CREATE keyword are also consumed so the ^ anchor still matches.
+# After stripping, strip_create_as_header calls _strip_outer_parens to handle the
+#   CREATE VIEW … AS (SELECT …) and CREATE VIEW … AS(SELECT …) forms — BQ
+#   INFORMATION_SCHEMA returns the body without the outer parens either way.
+# Two spacing branches at the end: \s* before ( (no space required), \s+ before
+# select/with/-- (keyword boundary needs at least one space to be unambiguous).
 _CREATE_AS_HEADER_RE = re.compile(
-    r"^\s*(?:/\*.*?\*/\s*|--[^\n]*\n\s*)*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+.*?\bas\s+(?=\(|select\b|with\b|--)",
+    r"^\s*(?:/\*.*?\*/\s*|--[^\n]*\n\s*)*create\s+(?:or\s+replace\s+)?(?:materialized\s+)?(?:view|table)\s+.*?\bas(?:\s*(?=\()|\s+(?=select\b|with\b|--))",
     re.IGNORECASE | re.DOTALL,
 )
 
