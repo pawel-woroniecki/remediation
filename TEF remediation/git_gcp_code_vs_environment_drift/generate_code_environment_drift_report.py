@@ -530,6 +530,10 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
         # within a single run and never leave a permanent object in GCP.
         if sql_file.stem.lower().startswith("tmp_"):
             continue
+        # Skip files stored under bq/migration or bq/archive folders — these are
+        # historical or one-off scripts that do not represent the current schema.
+        if any(part.lower() in {"migration", "archive"} for part in sql_file.relative_to(bq_root).parts):
+            continue
 
         sql = sql_file.read_text(encoding="utf-8", errors="replace")
         rel_path = str(sql_file.relative_to(snapshot_dir)).replace("\\", "/")
