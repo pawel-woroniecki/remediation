@@ -578,12 +578,17 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
                     # remove them so the post-processing loop doesn't overwrite the new types.
                     for col in new_cols:
                         entry.type_changes.pop(col, None)
-                    entry.is_ctas = bool(_CTAS_RE.search(sql))
+                    # Only mark as CTAS when there are no explicit column definitions.
+                    # _CTAS_RE searches the full file; a multi-statement file with a
+                    # regular CREATE TABLE and a CTAS for another table would otherwise
+                    # incorrectly flag the regular table as CTAS.
+                    entry.is_ctas = bool(_CTAS_RE.search(sql)) and not new_cols
             else:
                 entry.sql_fragments.append(sql)
                 if object_type == "table":
-                    entry.columns.update(extract_columns_from_create_table(sql))
-                    if _CTAS_RE.search(sql):
+                    new_cols = extract_columns_from_create_table(sql)
+                    entry.columns.update(new_cols)
+                    if _CTAS_RE.search(sql) and not new_cols:
                         entry.is_ctas = True
             entry.multi_statement = len(entry.files) > 1
             if dataset and not entry.dataset:
