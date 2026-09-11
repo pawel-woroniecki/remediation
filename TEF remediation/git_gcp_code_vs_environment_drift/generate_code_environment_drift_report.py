@@ -451,6 +451,11 @@ def extract_columns_from_create_table(sql: str) -> dict[str, str]:
             line = raw_line.strip().rstrip(",")
             if not line or line.startswith("--"):
                 continue
+            # Skip table constraint declarations — they are not column definitions.
+            # PRIMARY KEY / FOREIGN KEY / UNIQUE / CHECK would otherwise be parsed
+            # as a column named PRIMARY/FOREIGN/UNIQUE/CHECK with type KEY/KEY/…
+            if re.match(r"(primary|foreign)\s+key\b|(unique|check)\s*\(", line, re.IGNORECASE):
+                continue
             column_match = re.match(r"`?(?P<name>[\w\-]+)`?\s+(?P<dtype>[A-Z0-9_<>,]+)", line, flags=re.IGNORECASE)
             if column_match:
                 columns[column_match.group("name")] = column_match.group("dtype").upper()
