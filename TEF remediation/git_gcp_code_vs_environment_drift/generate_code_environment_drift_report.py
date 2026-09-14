@@ -445,18 +445,24 @@ _CREATE_TABLE_BODY_RE = re.compile(
     # CURRENT_TIMESTAMP() is immediately followed by OPTIONS and would otherwise
     # satisfy the old \)\s*options lookahead, truncating all subsequent columns.
     # re.MULTILINE makes ^ match the start of each line; re.DOTALL keeps . spanning newlines.
-    r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s*)?`?(?:[\w\-]+\.)?[\w\-]+\.[\w\-]+`?\s*\((?P<body>.*?)^\s*\)\s*(?:options|partition|cluster|;)",
+    # (?P<tbl>) captures the unqualified table name so multi-statement files can be
+    # filtered to only the target object's column block.
+    r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s*)?`?(?:[\w\-]+\.)?[\w\-]+\.(?P<tbl>[\w\-]+)`?\s*\((?P<body>.*?)^\s*\)\s*(?:options|partition|cluster|;)",
     re.IGNORECASE | re.DOTALL | re.MULTILINE,
 )
 
 
-def extract_columns_from_create_table(sql: str) -> dict[str, str]:
+def extract_columns_from_create_table(sql: str, target_name: str | None = None) -> dict[str, str]:
     # Use finditer so that files with multiple CREATE TABLE statements (e.g. a
     # first statement with the old schema followed by a CREATE TABLE IF NOT EXISTS
     # with the updated schema) are handled correctly — later definitions override
     # earlier ones for the same column name.
+    # When target_name is given only the block for that specific table is used,
+    # preventing multi-statement files from leaking columns across table entries.
     columns: dict[str, str] = {}
     for match in _CREATE_TABLE_BODY_RE.finditer(sql):
+        if target_name and match.group("tbl").lower() != target_name.lower():
+            continue
         body = match.group("body")
         for raw_line in body.splitlines():
             line = raw_line.strip().rstrip(",")
@@ -600,7 +606,7 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             if is_replace and len(entry.files) > 1:
                 entry.sql_fragments = [sql]
                 if object_type == "table":
-                    new_cols = extract_columns_from_create_table(sql)
+                    new_cols = extract_columns_from_create_table(sql, target_name=object_name)
                     entry.columns = new_cols
                     # ALTER TABLE type-changes that predate this CREATE TABLE are superseded;
                     # remove them so the post-processing loop doesn't overwrite the new types.
@@ -614,7 +620,7 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             else:
                 entry.sql_fragments.append(sql)
                 if object_type == "table":
-                    new_cols = extract_columns_from_create_table(sql)
+                    new_cols = extract_columns_from_create_table(sql, target_name=object_name)
                     entry.columns.update(new_cols)
                     if _CTAS_RE.search(sql) and not new_cols:
                         entry.is_ctas = True
