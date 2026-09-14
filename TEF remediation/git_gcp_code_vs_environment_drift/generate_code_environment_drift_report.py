@@ -434,8 +434,14 @@ def extract_all_bq_targets(sql: str) -> list[tuple[str | None, str, str]]:
 
 
 _CREATE_TABLE_BODY_RE = re.compile(
-    r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s*)?`?(?:[\w\-]+\.)?[\w\-]+\.[\w\-]+`?\s*\((?P<body>.*?)\)\s*(?:options|partition|cluster|;)",
-    re.IGNORECASE | re.DOTALL,
+    # ^\s*\) requires the closing paren to be at the start of a line (with optional
+    # leading whitespace). This prevents early termination at mid-line parens such as
+    # `col TIMESTAMP DEFAULT CURRENT_TIMESTAMP() OPTIONS(description="…")` where
+    # CURRENT_TIMESTAMP() is immediately followed by OPTIONS and would otherwise
+    # satisfy the old \)\s*options lookahead, truncating all subsequent columns.
+    # re.MULTILINE makes ^ match the start of each line; re.DOTALL keeps . spanning newlines.
+    r"create\s+(?:or\s+replace\s+)?table\s+(?:if\s+not\s+exists\s*)?`?(?:[\w\-]+\.)?[\w\-]+\.[\w\-]+`?\s*\((?P<body>.*?)^\s*\)\s*(?:options|partition|cluster|;)",
+    re.IGNORECASE | re.DOTALL | re.MULTILINE,
 )
 
 
