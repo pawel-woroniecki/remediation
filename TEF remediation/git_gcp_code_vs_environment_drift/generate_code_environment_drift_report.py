@@ -1308,37 +1308,46 @@ def compare_bigquery(
             if source.object_type == "table" and source.is_ctas:
                 # GCP INFORMATION_SCHEMA.TABLES.ddl includes the full CTAS DDL with header.
                 # Strip the header from both sides so comparison is body-only.
-                source_sql = normalize_sql(
-                    strip_create_as_header(
-                        strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id)
+                #
+                # Guard: when GCP DDL does NOT look like a CTAS (no AS SELECT/WITH after the
+                # table name), BigQuery has materialized the schema as explicit column
+                # definitions — this happens after ALTER TABLE changes or schema evolution.
+                # A body comparison is meaningless in that case (CTAS SELECT body vs.
+                # column-list DDL will always differ textually), so skip it entirely and rely
+                # on the schema_mismatch check to catch any column differences.
+                raw_gcp_ddl = actual.get("ddl") or ""
+                if _CTAS_RE.search(raw_gcp_ddl):
+                    source_sql = normalize_sql(
+                        strip_create_as_header(
+                            strip_redundant_project_qualifiers("\n".join(source.sql_fragments), project_id)
+                        )
                     )
-                )
-                actual_sql = normalize_sql(
-                    strip_create_as_header(
-                        strip_redundant_project_qualifiers(actual.get("ddl") or "", project_id)
+                    actual_sql = normalize_sql(
+                        strip_create_as_header(
+                            strip_redundant_project_qualifiers(raw_gcp_ddl, project_id)
+                        )
                     )
-                )
-                if actual_sql and source_sql and source_sql != actual_sql:
-                    _SNIPPET = 400
-                    src_snippet = source_sql[:_SNIPPET] + ("…" if len(source_sql) > _SNIPPET else "")
-                    gcp_snippet = actual_sql[:_SNIPPET] + ("…" if len(actual_sql) > _SNIPPET else "")
-                    findings.append(
-                        {
-                            "area": "bigquery",
-                            "object_name": object_name,
-                            "dataset": actual.get("dataset"),
-                            "status": "definition_mismatch",
-                            "severity": "high",
-                            "source_technology": source.source_kind,
-                            "source_sql_snippet": src_snippet,
-                            "gcp_sql_snippet": gcp_snippet,
-                            "details": (
-                                f"Source CTAS body and GCP CTAS body differ after normalization. "
-                                f"Source ({len(source_sql)} chars): {src_snippet!r} | "
-                                f"GCP ({len(actual_sql)} chars): {gcp_snippet!r}"
-                            ),
-                        }
-                    )
+                    if actual_sql and source_sql and source_sql != actual_sql:
+                        _SNIPPET = 400
+                        src_snippet = source_sql[:_SNIPPET] + ("…" if len(source_sql) > _SNIPPET else "")
+                        gcp_snippet = actual_sql[:_SNIPPET] + ("…" if len(actual_sql) > _SNIPPET else "")
+                        findings.append(
+                            {
+                                "area": "bigquery",
+                                "object_name": object_name,
+                                "dataset": actual.get("dataset"),
+                                "status": "definition_mismatch",
+                                "severity": "high",
+                                "source_technology": source.source_kind,
+                                "source_sql_snippet": src_snippet,
+                                "gcp_sql_snippet": gcp_snippet,
+                                "details": (
+                                    f"Source CTAS body and GCP CTAS body differ after normalization. "
+                                    f"Source ({len(source_sql)} chars): {src_snippet!r} | "
+                                    f"GCP ({len(actual_sql)} chars): {gcp_snippet!r}"
+                                ),
+                            }
+                        )
     return findings
 
 
