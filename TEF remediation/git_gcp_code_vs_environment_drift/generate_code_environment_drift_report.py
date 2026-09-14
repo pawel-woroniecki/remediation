@@ -363,9 +363,13 @@ _CREATE_AS_HEADER_RE = re.compile(
 )
 
 # Detects CTAS tables (CREATE TABLE … AS SELECT/WITH) — these have no column definitions.
+# [^(]*? (no opening paren) prevents matching across the column-definition block: a regular
+# CREATE TABLE always has `(` before anything else, so the regex fails there; a genuine CTAS
+# has no `(` between the table name and AS SELECT/WITH.  This also stops the pattern from
+# spanning past a closing `)` into a subsequent INSERT INTO … SELECT in the same file.
 _CTAS_RE = re.compile(
-    r"create\s+(?:or\s+replace\s+)?table\s+.*?\bas\s+(?:select|with)\b",
-    re.IGNORECASE | re.DOTALL,
+    r"create\s+(?:or\s+replace\s+)?table\s+[^(]*?\bas\s+(?:select|with)\b",
+    re.IGNORECASE,
 )
 
 # Matches RENAME TO in ALTER TABLE statements — used to skip "old name" from inventory.
