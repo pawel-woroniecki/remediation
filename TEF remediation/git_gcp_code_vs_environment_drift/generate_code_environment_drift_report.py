@@ -536,13 +536,14 @@ def _sql_version_key(path: Path) -> tuple:
     return (int(m.group(1)) if m else 0, path.parent, path.name)
 
 
-def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObject], set[str]]:
+def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObject], set[str], list[dict]]:
     """Build a normalized inventory of source-side BigQuery objects from BQ DDL."""
     inventory: dict[str, SourceBqObject] = {}
     table_renames: list[tuple[str, str]] = []  # (old_name, new_name)
+    misplaced_ddl_findings: list[dict] = []
     bq_root = snapshot_dir / "bq"
     if not bq_root.exists():
-        return inventory, set()
+        return inventory, set(), []
 
     # Build the sibling-aware version key: _v(\d+) is a version suffix only when
     # the base file (name without that suffix) exists in the same directory.
@@ -578,6 +579,34 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
         # Skip pure DML / MERGE / script files — no DDL of any kind.
         if not targets and not alter_match:
             continue
+
+        # Compute the object name this file is expected to define.
+        # Strip _v\d+ version suffix only when the base file exists as a sibling.
+        _vm = re.search(r"_v(\d+)\.sql$", sql_file.name, re.IGNORECASE)
+        if _vm:
+            _base_file = sql_file.parent / (sql_file.name[: _vm.start(0)] + ".sql")
+            expected_stem = (sql_file.name[: _vm.start(0)] if _base_file in _all_sql else sql_file.stem).lower()
+        else:
+            expected_stem = sql_file.stem.lower()
+
+        # Flag any CREATE target whose name doesn't match the expected stem.
+        for _ds, _oname, _otype in targets:
+            if _oname.lower() != expected_stem:
+                misplaced_ddl_findings.append({
+                    "area": "bigquery",
+                    "object_name": _oname,
+                    "dataset": _ds,
+                    "status": "misplaced_ddl",
+                    "severity": "medium",
+                    "source_technology": "bq",
+                    "misplaced_in_file": rel_path,
+                    "expected_object": expected_stem,
+                    "details": (
+                        f"File '{rel_path}' contains DDL for '{_oname}' "
+                        f"but its name implies the object should be '{expected_stem}'. "
+                        f"Each file should contain DDL only for the object matching its filename."
+                    ),
+                })
 
         # Register every CREATE DDL object found in this file (handles multi-table files).
         is_replace = bool(re.search(
@@ -702,7 +731,7 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
                 if op[1] in entry.columns:
                     entry.columns[op[1]] = op[2]
 
-    return inventory, renamed_away_names
+    return inventory, renamed_away_names, misplaced_ddl_findings
 
 
 def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
@@ -1671,7 +1700,7 @@ def main() -> int:
             },
         )
 
-        source_bq, renamed_away_names = build_source_bq_inventory(snapshot_dir)
+        source_bq, renamed_away_names, misplaced_ddl_findings = build_source_bq_inventory(snapshot_dir)
         source_dbt = build_source_dbt_inventory(snapshot_dir)
         dbt_snapshot_names = build_dbt_snapshot_names(snapshot_dir)
         source_dags = build_source_dag_inventory(snapshot_dir)
@@ -1703,6 +1732,8 @@ def main() -> int:
         else:
             actual_bq = {}
             bq_findings = []
+
+        bq_findings.extend(misplaced_ddl_findings)
 
         summary = {
             "generated_utc": datetime.now(timezone.utc).isoformat(),
