@@ -538,10 +538,22 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
     if not bq_root.exists():
         return inventory, set()
 
-    for sql_file in sorted(
-        (f for f in bq_root.rglob("*") if f.suffix.lower() == ".sql"),
-        key=_sql_version_key,
-    ):
+    # Build the sibling-aware version key: _v(\d+) is a version suffix only when
+    # the base file (name without that suffix) exists in the same directory.
+    # Without this check, a view named v_foo_v5.sql gets version_number=5 and
+    # sorts *after* its v_foo_v5_v2.sql (version=2), causing the base to
+    # "supersede" the versioned file instead of the other way round.
+    _all_sql = frozenset(f for f in bq_root.rglob("*") if f.suffix.lower() == ".sql")
+
+    def _sibling_aware_version_key(path: Path) -> tuple:
+        m = re.search(r"_v(\d+)\.sql$", path.name, re.IGNORECASE)
+        if m:
+            base_file = path.parent / (path.name[: m.start(0)] + ".sql")
+            if base_file in _all_sql:
+                return (int(m.group(1)), path.parent, path.name)
+        return (0, path.parent, path.name)
+
+    for sql_file in sorted(_all_sql, key=_sibling_aware_version_key):
         # Skip temporary processing scripts (tmp_*) — they create and drop objects
         # within a single run and never leave a permanent object in GCP.
         if sql_file.stem.lower().startswith("tmp_"):
