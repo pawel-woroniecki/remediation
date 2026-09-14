@@ -608,6 +608,42 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
                     ),
                 })
 
+        # Flag DDL (CREATE or ALTER TABLE) stored under a dml folder.
+        # DDL belongs in the sibling ddl/ folder; dml/ is for INSERT/UPDATE/DELETE/MERGE.
+        _rel_parts = sql_file.relative_to(bq_root).parts
+        if "dml" in (p.lower() for p in _rel_parts) and (targets or alter_match):
+            if targets:
+                for _ds, _oname, _otype in targets:
+                    misplaced_ddl_findings.append({
+                        "area": "bigquery",
+                        "object_name": _oname,
+                        "dataset": _ds,
+                        "status": "ddl_in_dml_folder",
+                        "severity": "medium",
+                        "source_technology": "bq",
+                        "misplaced_in_file": rel_path,
+                        "details": (
+                            f"File '{rel_path}' contains DDL (CREATE {_otype.upper()}) for '{_oname}' "
+                            f"but is stored under a dml folder. DDL belongs in the sibling ddl folder."
+                        ),
+                    })
+            elif alter_match:
+                _obj = alter_match.group("object")
+                _alt_ds = alter_match.group("dataset")
+                misplaced_ddl_findings.append({
+                    "area": "bigquery",
+                    "object_name": _obj,
+                    "dataset": _alt_ds,
+                    "status": "ddl_in_dml_folder",
+                    "severity": "medium",
+                    "source_technology": "bq",
+                    "misplaced_in_file": rel_path,
+                    "details": (
+                        f"File '{rel_path}' contains DDL (ALTER TABLE) for '{_obj}' "
+                        f"but is stored under a dml folder. DDL belongs in the sibling ddl folder."
+                    ),
+                })
+
         # Register every CREATE DDL object found in this file (handles multi-table files).
         is_replace = bool(re.search(
             r"\bcreate\s+(?:or\s+replace\s+)?(?:table|view)(?:\s+if\s+not\s+exists)?\s+",
