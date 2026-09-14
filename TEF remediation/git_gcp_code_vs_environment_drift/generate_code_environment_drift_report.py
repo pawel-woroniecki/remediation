@@ -1284,6 +1284,9 @@ def compare_bigquery(
                     # the definitions are semantically equivalent.
                     select_star_match = bool(_SELECT_STAR_VIEW_RE.match(source_sql.strip()))
                     if not fragment_match and not select_star_match:
+                        _SNIPPET = 400
+                        src_snippet = source_sql[:_SNIPPET] + ("…" if len(source_sql) > _SNIPPET else "")
+                        gcp_snippet = actual_sql[:_SNIPPET] + ("…" if len(actual_sql) > _SNIPPET else "")
                         findings.append(
                             {
                                 "area": "bigquery",
@@ -1292,8 +1295,12 @@ def compare_bigquery(
                                 "status": "definition_mismatch",
                                 "severity": "high",
                                 "source_technology": source.source_kind,
+                                "source_sql_snippet": src_snippet,
+                                "gcp_sql_snippet": gcp_snippet,
                                 "details": (
-                                    "Source view definition and selected GCP view definition differ after normalization."
+                                    f"Source view definition and GCP view definition differ after normalization. "
+                                    f"Source ({len(source_sql)} chars): {src_snippet!r} | "
+                                    f"GCP ({len(actual_sql)} chars): {gcp_snippet!r}"
                                 ),
                             }
                         )
@@ -1312,6 +1319,9 @@ def compare_bigquery(
                     )
                 )
                 if actual_sql and source_sql and source_sql != actual_sql:
+                    _SNIPPET = 400
+                    src_snippet = source_sql[:_SNIPPET] + ("…" if len(source_sql) > _SNIPPET else "")
+                    gcp_snippet = actual_sql[:_SNIPPET] + ("…" if len(actual_sql) > _SNIPPET else "")
                     findings.append(
                         {
                             "area": "bigquery",
@@ -1320,7 +1330,13 @@ def compare_bigquery(
                             "status": "definition_mismatch",
                             "severity": "high",
                             "source_technology": source.source_kind,
-                            "details": "Source CTAS body and GCP CTAS body differ after normalization.",
+                            "source_sql_snippet": src_snippet,
+                            "gcp_sql_snippet": gcp_snippet,
+                            "details": (
+                                f"Source CTAS body and GCP CTAS body differ after normalization. "
+                                f"Source ({len(source_sql)} chars): {src_snippet!r} | "
+                                f"GCP ({len(actual_sql)} chars): {gcp_snippet!r}"
+                            ),
                         }
                     )
     return findings
