@@ -152,6 +152,7 @@ def _strip_outer_parens(sql: str) -> str:
 def strip_create_as_header(sql: str) -> str:
     """Remove CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE ... AS header, leaving the body."""
     body = _CREATE_AS_HEADER_RE.sub("", sql, count=1).strip()
+    body = body.rstrip(";").strip()
     return _strip_outer_parens(body)
 
 
