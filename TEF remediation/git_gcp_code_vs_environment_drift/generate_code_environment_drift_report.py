@@ -1265,20 +1265,39 @@ def compare_bigquery(
                 )
                 if actual_sql and source_sql and source_sql != actual_sql:
                     # For objects defined across multiple source files (e.g. a base file and
-                    # a FM_DTM_1h_v1.sql supersession), also check each fragment individually.
+                    # a slm_measurement_v1.sql supersession), also check each fragment individually.
                     # If any single fragment matches GCP the latest deployed version is already
                     # in source — the joined sql_fragments just produced a non-matching string.
-                    frag_normalized = [
-                        normalize_sql(
+                    def _norm_frag(frag: str) -> str:
+                        return normalize_sql(
                             strip_create_as_header(
                                 strip_redundant_project_qualifiers(frag, project_id)
                             )
                         )
-                        for frag in source.sql_fragments
-                    ]
-                    fragment_match = source.multi_statement and any(
-                        fn == actual_sql for fn in frag_normalized
-                    )
+
+                    frag_normalized = [_norm_frag(frag) for frag in source.sql_fragments]
+                    # multi_statement guard dropped: even single-fragment entries should
+                    # suppress if their one fragment matches GCP.
+                    fragment_match = any(fn == actual_sql for fn in frag_normalized)
+                    # Cross-dataset collision can split a base file and its versioned successor
+                    # (_v1.sql) into separate inventory entries.  When that happens the current
+                    # entry's sql_fragments hold the old SQL while the v1 sql landed in a sibling
+                    # entry (same base name, same dataset, different inventory key).  Check all
+                    # sibling entries and suppress the finding if any sibling fragment matches GCP.
+                    if not fragment_match:
+                        base_name = object_name.split(".")[-1]
+                        entry_dataset = source.dataset or ""
+                        for _sib_key, _sib in source_bq.items():
+                            if _sib_key == object_name:
+                                continue
+                            if _sib_key.split(".")[-1] != base_name:
+                                continue
+                            _sib_dataset = _sib.dataset or ""
+                            if _sib_dataset and entry_dataset and _sib_dataset != entry_dataset:
+                                continue
+                            if any(_norm_frag(f) == actual_sql for f in _sib.sql_fragments):
+                                fragment_match = True
+                                break
                     # Suppress when source is a bare SELECT * FROM <table> — GCP may store
                     # the expanded column list, making string comparison fail even though
                     # the definitions are semantically equivalent.
