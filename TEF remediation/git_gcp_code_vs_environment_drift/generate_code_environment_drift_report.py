@@ -683,6 +683,22 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
                 if op[1] in entry.columns:
                     entry.columns[op[1]] = op[2]
 
+    # DEBUG: dump every inventory entry whose base name is slm_measurement so we can
+    # diagnose the cross-dataset collision / version-merge issue.
+    for _dbg_key, _dbg_entry in inventory.items():
+        if _dbg_key.split(".")[-1].lower() == "slm_measurement":
+            log(
+                "DEBUG",
+                "inventory_entry_debug",
+                inv_key=_dbg_key,
+                dataset=_dbg_entry.dataset,
+                object_type=_dbg_entry.object_type,
+                files=_dbg_entry.files,
+                multi_statement=_dbg_entry.multi_statement,
+                num_fragments=len(_dbg_entry.sql_fragments),
+                fragment_starts=[f[:120].replace("\n", " ") for f in _dbg_entry.sql_fragments],
+            )
+
     return inventory, renamed_away_names
 
 
