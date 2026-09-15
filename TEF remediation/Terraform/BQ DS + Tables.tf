@@ -559,7 +559,7 @@ resource "google_bigquery_table" "orphan_datasets_job_summary" {
         e.duration_seconds,
         COUNT(DISTINCT o.dataset_name)       AS orphan_datasets_found,
         COALESCE(SUM(o.table_count), 0)      AS total_objects_in_orphans,
-        COUNTIF(o.risk_score >= 2)           AS high_risk_datasets
+        COUNT(DISTINCT IF(o.risk_score >= 2, o.dataset_name, NULL)) AS high_risk_datasets
       FROM `${var.reporting_project_id}.devops_reports.executions` e
       LEFT JOIN `${var.reporting_project_id}.devops_reports.orphan_datasets` o
         USING (execution_id)
