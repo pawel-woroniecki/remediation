@@ -466,6 +466,9 @@ resource "google_bigquery_table" "commit_drift_job_summary" {
         USING (execution_id)
       WHERE e.report_type = 'commit_drift'
         AND (k.drift_type = 'commit' OR k.drift_type IS NULL)
+        AND (k.repo IS NULL OR k.repo NOT IN (
+          'central_cicd_templates', 'cloud_run_source', 'dataflow', 'dataquality_framework'
+        ))
       GROUP BY 1, 2, 3, 4, 5
     EOT
     use_legacy_sql = false
@@ -503,6 +506,9 @@ resource "google_bigquery_table" "file_drift_job_summary" {
         USING (execution_id)
       WHERE e.report_type = 'file_drift'
         AND (k.drift_type = 'content' OR k.drift_type IS NULL)
+        AND (k.repo IS NULL OR k.repo NOT IN (
+          'central_cicd_templates', 'cloud_run_source', 'dataflow', 'dataquality_framework'
+        ))
       GROUP BY 1, 2, 3, 4, 5
     EOT
     use_legacy_sql = false
