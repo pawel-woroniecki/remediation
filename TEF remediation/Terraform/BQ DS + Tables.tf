@@ -459,13 +459,16 @@ resource "google_bigquery_table" "commit_drift_job_summary" {
         COUNT(DISTINCT k.repo) - COUNT(DISTINCT IF(k.status != 'ok', k.repo, NULL))               AS repos_ok,
         COUNT(DISTINCT IF(k.status = 'missing_branch', k.repo, NULL))                             AS repos_missing_branch,
         COUNT(DISTINCT IF(k.severity != 'none',        k.repo, NULL))                             AS repos_with_drift,
-        -- repos with any commits in a critical direction (production/test not in master, production not in test)
-        -- regardless of severity field value (which is commit-count based, not direction based)
+        -- repos with any commits in a critical direction:
+        --   production not in master  (left=master,  right=production)
+        --   test not in master        (left=master,  right=test)
+        --   production not in test    (left=test,    right=production)
+        -- left_branch is the base; right_branch is the branch with extra commits
         COUNT(DISTINCT IF(
           k.unique_commits > 0 AND (
-            (k.left_branch LIKE '%production%' AND k.right_branch LIKE '%master%') OR
-            (k.left_branch LIKE '%test%'       AND k.right_branch LIKE '%master%') OR
-            (k.left_branch LIKE '%production%' AND k.right_branch LIKE '%test%')
+            (k.left_branch LIKE '%master%' AND k.right_branch LIKE '%production%') OR
+            (k.left_branch LIKE '%master%' AND k.right_branch LIKE '%test%')       OR
+            (k.left_branch LIKE '%test%'   AND k.right_branch LIKE '%production%')
           ), k.repo, NULL
         ))                                                                                          AS repos_critical_drift,
         COALESCE(SUM(k.unique_commits), 0)                                                         AS total_commits_in_drift
