@@ -9,15 +9,32 @@ DIAGRAM 1 — System architecture (Section: Architecture > High-level overview)
 ------------------------------------------------------------------------------
 
 flowchart LR
-    GL["GitLab\nFastOSS_B/ndl_core\n40+ repos"]
-    CS["Cloud Scheduler\n6 triggers\n05:00-05:50 Berlin"]
-    CRJ["Cloud Run Jobs\n6 jobs\ntefde-gcp-fastoss-dev-gke"]
-    GCP_P["GCP prod\ntefde-gcp-fastoss-prod\nBQ schema + GCS"]
-    GCP_T["GCP test\ntefde-gcp-fastoss-test\nBQ schema + GCS"]
-    GCP_D["GCP dev\ntefde-gcp-fastoss-dev-gke\nBQ schema"]
-    BQ[("BigQuery\ntefde-gcp-fastoss-dev\ndevops_reports dataset")]
-    GCS[("GCS\nReport files\n.md / .csv")]
-    LS["Looker Studio\n8 dashboards"]
+    GL["GitLab
+FastOSS_B/ndl_core
+40+ repos"]
+    CS["Cloud Scheduler
+6 triggers
+05:00-05:50 Berlin"]
+    CRJ["Cloud Run Jobs
+6 jobs
+tefde-gcp-fastoss-dev-gke"]
+    GCP_P["GCP prod
+tefde-gcp-fastoss-prod
+BQ schema + GCS"]
+    GCP_T["GCP test
+tefde-gcp-fastoss-test
+BQ schema + GCS"]
+    GCP_D["GCP dev
+tefde-gcp-fastoss-dev-gke
+BQ schema"]
+    BQ[("BigQuery
+tefde-gcp-fastoss-dev
+devops_reports dataset")]
+    GCS[("GCS
+Report files
+.md / .csv")]
+    LS["Looker Studio
+8 dashboards"]
 
     CS -->|"HTTP POST RunJob"| CRJ
     CRJ -->|"git clone"| GL
@@ -33,17 +50,30 @@ DIAGRAM 2 — Environment Drift flow (Section: How each report works > Environme
 ----------------------------------------------------------------------------------------
 
 flowchart TD
-    A["Cloud Scheduler trigger"] --> B["Cloud Run Job starts\nloads GitLab token from Secret Manager"]
-    B --> C["Clone all repos in FastOSS_B/ndl_core\nskip demo_* repos"]
-    C --> D{{"For each repo\n(parallel)"}}
-    D --> E["Parse DDL / dbt YAML\nfrom git branch\nproduction / test / master"]
-    D --> F["Query BQ INFORMATION_SCHEMA\nin target GCP project"]
-    E & F --> G["Compare schemas\nobject by object"]
-    G --> H{{"Differences\nfound?"}}
-    H -- "Yes" --> I["Write rows to\nenv_drift_findings\n(one row per drifted object)"]
-    H -- "No" --> J["Write execution record\nto executions table\nstatus = success"]
+    A["Cloud Scheduler trigger"] --> B["Cloud Run Job starts
+loads GitLab token from Secret Manager"]
+    B --> C["Clone all repos in FastOSS_B/ndl_core
+skip demo_* repos"]
+    C --> D{{"For each repo
+(parallel)"}}
+    D --> E["Parse DDL / dbt YAML
+from git branch
+production / test / master"]
+    D --> F["Query BQ INFORMATION_SCHEMA
+in target GCP project"]
+    E & F --> G["Compare schemas
+object by object"]
+    G --> H{{"Differences
+found?"}}
+    H -- "Yes" --> I["Write rows to
+env_drift_findings
+(one row per drifted object)"]
+    H -- "No" --> J["Write execution record
+to executions table
+status = success"]
     I --> J
-    J --> K["Upload report.md\nto GCS bucket"]
+    J --> K["Upload report.md
+to GCS bucket"]
 
 
 DIAGRAM 3 — Commit Drift flow (Section: How each report works > Commit Drift)
@@ -51,12 +81,24 @@ DIAGRAM 3 — Commit Drift flow (Section: How each report works > Commit Drift)
 
 flowchart TD
     A["Cloud Scheduler trigger"] --> B["Clone all repos"]
-    B --> C{{"For each repo\n(parallel)"}}
-    C --> D["Compare 6 branch pairs:\nmaster<>production\nmaster<>test\nproduction<>test\n(both directions each)"]
-    D --> E["Find commits in right branch\nnot present in left branch\n(git log A..B)"]
-    E --> F["Write KPI summary\nto branch_drift_kpis\n(one row per repo x direction)"]
-    F --> G["Write commit detail\nto branch_drift_evidence\n(one row per commit x file)"]
-    G --> H["Write execution record\nto executions table"]
+    B --> C{{"For each repo
+(parallel)"}}
+    C --> D["Compare 6 branch pairs:
+master<>production
+master<>test
+production<>test
+(both directions each)"]
+    D --> E["Find commits in right branch
+not present in left branch
+(git log A..B)"]
+    E --> F["Write KPI summary
+to branch_drift_kpis
+(one row per repo x direction)"]
+    F --> G["Write commit detail
+to branch_drift_evidence
+(one row per commit x file)"]
+    G --> H["Write execution record
+to executions table"]
 
 
 DIAGRAM 4 — File Drift flow (Section: How each report works > File Content Drift)
@@ -64,11 +106,17 @@ DIAGRAM 4 — File Drift flow (Section: How each report works > File Content Dri
 
 flowchart TD
     A["Cloud Scheduler trigger"] --> B["Clone all repos"]
-    B --> C{{"For each repo\n(parallel)"}}
-    C --> D["git diff --name-status\nbetween branch pairs"]
-    D --> E["Classify each file:\nAdded / Modified / Deleted / Renamed"]
-    E --> F["Write KPI summary\nto branch_drift_kpis\n(drift_type = content)"]
-    F --> G["Write file detail\nto branch_drift_evidence"]
+    B --> C{{"For each repo
+(parallel)"}}
+    C --> D["git diff --name-status
+between branch pairs"]
+    D --> E["Classify each file:
+Added / Modified / Deleted / Renamed"]
+    E --> F["Write KPI summary
+to branch_drift_kpis
+(drift_type = content)"]
+    F --> G["Write file detail
+to branch_drift_evidence"]
     G --> H["Write execution record"]
 
 
@@ -77,10 +125,17 @@ DIAGRAM 5 — Orphan Datasets flow (Section: How each report works > Orphan Data
 
 flowchart TD
     A["Cloud Scheduler trigger"] --> B["Cloud Run Job starts"]
-    B --> C["List all BQ datasets\nin tefde-gcp-fastoss-prod\nvia INFORMATION_SCHEMA"]
-    B --> D["Clone all repos\nfrom GitLab"]
-    D --> E["Extract dataset references\nfrom DDL / dbt / CI files"]
-    C & E --> F["Find datasets with\nno code reference"]
-    F --> G["Score each orphan\nby risk: age x size x table_count"]
-    G --> H["Write to orphan_datasets\nand orphan_dataset_objects"]
+    B --> C["List all BQ datasets
+in tefde-gcp-fastoss-prod
+via INFORMATION_SCHEMA"]
+    B --> D["Clone all repos
+from GitLab"]
+    D --> E["Extract dataset references
+from DDL / dbt / CI files"]
+    C & E --> F["Find datasets with
+no code reference"]
+    F --> G["Score each orphan
+by risk: age x size x table_count"]
+    G --> H["Write to orphan_datasets
+and orphan_dataset_objects"]
     H --> I["Write execution record"]
