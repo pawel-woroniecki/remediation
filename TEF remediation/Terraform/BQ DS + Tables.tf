@@ -436,6 +436,114 @@ resource "google_bigquery_table" "env_drift_job_summary" {
 }
 
 # ---------------------------------------------------------------------------
+# Looker Studio view — commit_drift job-level run summary
+# ---------------------------------------------------------------------------
+# One row per Cloud Run job execution of commit_drift.
+# Derives per-run repo counts from branch_drift_kpis (drift_type='commit')
+# so the dashboard can show repos_processed, repos_with_drift, severity counts.
+resource "google_bigquery_table" "commit_drift_job_summary" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "commit_drift_job_summary"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      SELECT
+        e.execution_id,
+        e.execution_ts,
+        e.triggered_by,
+        e.status,
+        e.duration_seconds,
+        COUNT(DISTINCT k.repo)                                     AS repos_processed,
+        COUNTIF(k.status = 'ok')                                   AS repos_ok,
+        COUNTIF(k.status = 'missing_branch')                       AS repos_missing_branch,
+        COUNT(DISTINCT IF(k.severity != 'none', k.repo, NULL))     AS repos_with_drift,
+        COUNT(DISTINCT IF(k.severity = 'high',  k.repo, NULL))     AS repos_high_severity,
+        COALESCE(SUM(k.unique_commits), 0)                         AS total_commits_in_drift
+      FROM `${var.reporting_project_id}.devops_reports.executions` e
+      LEFT JOIN `${var.reporting_project_id}.devops_reports.branch_drift_kpis` k
+        USING (execution_id)
+      WHERE e.report_type = 'commit_drift'
+        AND (k.drift_type = 'commit' OR k.drift_type IS NULL)
+      GROUP BY 1, 2, 3, 4, 5
+    EOT
+    use_legacy_sql = false
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Looker Studio view — file_drift job-level run summary
+# ---------------------------------------------------------------------------
+# One row per Cloud Run job execution of file_drift.
+# Derives per-run repo counts from branch_drift_kpis (drift_type='content').
+resource "google_bigquery_table" "file_drift_job_summary" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "file_drift_job_summary"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      SELECT
+        e.execution_id,
+        e.execution_ts,
+        e.triggered_by,
+        e.status,
+        e.duration_seconds,
+        COUNT(DISTINCT k.repo)                                     AS repos_processed,
+        COUNTIF(k.status = 'ok')                                   AS repos_ok,
+        COUNTIF(k.status = 'missing_branch')                       AS repos_missing_branch,
+        COUNTIF(k.status = 'error')                                AS repos_with_error,
+        COUNT(DISTINCT IF(k.severity != 'none', k.repo, NULL))     AS repos_with_drift,
+        COUNT(DISTINCT IF(k.severity = 'high',  k.repo, NULL))     AS repos_high_severity,
+        COALESCE(SUM(k.unique_files), 0)                           AS total_files_in_drift
+      FROM `${var.reporting_project_id}.devops_reports.executions` e
+      LEFT JOIN `${var.reporting_project_id}.devops_reports.branch_drift_kpis` k
+        USING (execution_id)
+      WHERE e.report_type = 'file_drift'
+        AND (k.drift_type = 'content' OR k.drift_type IS NULL)
+      GROUP BY 1, 2, 3, 4, 5
+    EOT
+    use_legacy_sql = false
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Looker Studio view — orphan_datasets job-level run summary
+# ---------------------------------------------------------------------------
+# One row per Cloud Run job execution of orphan_datasets.
+# Derives counts from the orphan_datasets table (only orphan rows are stored;
+# datasets_scanned is not yet persisted — add it to repos_total in the script
+# as a follow-up to surface the "did it scan anything" signal).
+resource "google_bigquery_table" "orphan_datasets_job_summary" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "orphan_datasets_job_summary"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      SELECT
+        e.execution_id,
+        e.execution_ts,
+        e.triggered_by,
+        e.status,
+        e.duration_seconds,
+        COUNT(DISTINCT o.dataset_name)       AS orphan_datasets_found,
+        COALESCE(SUM(o.table_count), 0)      AS total_objects_in_orphans,
+        COUNTIF(o.risk_score >= 2)           AS high_risk_datasets
+      FROM `${var.reporting_project_id}.devops_reports.executions` e
+      LEFT JOIN `${var.reporting_project_id}.devops_reports.orphan_datasets` o
+        USING (execution_id)
+      WHERE e.report_type = 'orphan_datasets'
+      GROUP BY 1, 2, 3, 4, 5
+    EOT
+    use_legacy_sql = false
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Looker Studio view — management dashboard (red/green repo health grid)
 # ---------------------------------------------------------------------------
 # Connect to Looker Studio as a BigQuery data source:
