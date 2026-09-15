@@ -445,7 +445,7 @@ to `execution_ts` and set it to apply to all charts on the page.
 | `repos_ok` | Metric | Repos where all branch comparisons found no drift |
 | `repos_missing_branch` | Metric | Repos where one or more monitored branches do not exist |
 | `repos_with_drift` | Metric | Repos with at least one commit difference (any severity) |
-| `repos_high_severity` | Metric | Repos with high-severity commit drift |
+| `repos_critical_drift` | Metric | Repos with any commits in a critical direction (production/test not in master, or production not in test) — matches the red columns in the Commit Drift dashboard |
 | `total_commits_in_drift` | Metric | Total commits present in one branch but missing from another |
 
 ---
