@@ -318,7 +318,7 @@
   <h1>DevOps Drift Reports — Solution Design</h1>
   <div class="meta-row">
     <span class="badge">&#128197; Last updated: September 2026</span>
-    <span class="badge">&#9989; Version: 1.1</span>
+    <span class="badge">&#9989; Version: 1.2</span>
     <span class="badge">&#127968; Telefónica Germany / Capgemini</span>
     <span class="badge">&#128274; Internal</span>
   </div>
@@ -397,7 +397,7 @@
         <div class="diagram-label">System architecture</div>
         <div class="mermaid">
 flowchart LR
-    GL["GitLab\nfastoss subgroup\n40+ repos"]
+    GL["GitLab\nFastOSS_B/ndl_core\n40+ repos"]
     CS["Cloud Scheduler\n6 triggers\n05:00-05:50 Berlin"]
     CRJ["Cloud Run Jobs\n6 jobs\ntefde-gcp-fastoss-dev-gke"]
     GCP_P["GCP prod\ntefde-gcp-fastoss-prod\nBQ schema + GCS"]
@@ -428,12 +428,12 @@ flowchart LR
         <div class="comp-card">
           <div class="comp-type">Compute</div>
           <div class="comp-name">Cloud Run Jobs</div>
-          <p>Stateless containers (Docker image) running the Python report scripts. Each job scans all repos in the <code>fastoss</code> subgroup in parallel.</p>
+          <p>Stateless containers (Docker image) running the Python report scripts. Each job scans all repos in the <code>FastOSS_B/ndl_core</code> subgroup in parallel.</p>
         </div>
         <div class="comp-card">
           <div class="comp-type">Source of truth</div>
           <div class="comp-name">GitLab</div>
-          <p>All repositories in the <code>fastoss</code> subgroup. Repos are cloned at job start. <code>demo_*</code> repos are excluded automatically.</p>
+          <p>All repositories in the <code>FastOSS_B/ndl_core</code> subgroup. Repos are cloned at job start. <code>demo_*</code> repos are excluded automatically.</p>
         </div>
         <div class="comp-card">
           <div class="comp-type">Storage</div>
@@ -495,7 +495,7 @@ flowchart LR
             <div class="mermaid">
 flowchart TD
     A["Cloud Scheduler trigger"] --> B["Cloud Run Job starts\nloads GitLab token from Secret Manager"]
-    B --> C["Clone all repos in fastoss subgroup\nskip demo_* repos"]
+    B --> C["Clone all repos in FastOSS_B/ndl_core\nskip demo_* repos"]
     C --> D{{"For each repo\n(parallel)"}}
     D --> E["Parse DDL / dbt YAML\nfrom git branch\nproduction / test / master"]
     D --> F["Query BQ INFORMATION_SCHEMA\nin target GCP project"]
@@ -514,6 +514,23 @@ flowchart TD
               <tr><td>BigQuery tables / views</td><td>SQL DDL files (<code>CREATE TABLE</code>, <code>CREATE VIEW</code>)</td><td><code>INFORMATION_SCHEMA.TABLES</code> + <code>COLUMNS</code></td></tr>
               <tr><td>dbt models</td><td><code>schema.yml</code> / <code>models/*.sql</code></td><td>BQ dataset schema via INFORMATION_SCHEMA</td></tr>
               <tr><td>GCS objects</td><td>Files listed in repo's <code>.gitlab-ci.yml</code> bucket reference</td><td>Composer GCS bucket content</td></tr>
+            </tbody>
+          </table></div>
+          <h4>Convention checks (optional)</h4>
+          <p>Two opt-in source-code convention checks are available via CLI flags. Both are <strong>disabled by default</strong> to avoid noise during initial onboarding and must be enabled explicitly per run.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Flag</th><th>Finding type</th><th>What it detects</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>--check-misplaced-ddl</code></td>
+                <td><code>misplaced_ddl</code> (medium)</td>
+                <td>A SQL file contains a <code>CREATE TABLE</code> or <code>CREATE VIEW</code> for an object whose name does not match the file stem. Each file should define exactly the object its name implies. Versioned files (e.g. <code>my_view_v2.sql</code> when <code>my_view.sql</code> also exists) are excluded from this check.</td>
+              </tr>
+              <tr>
+                <td><code>--check-ddl-in-dml-folder</code></td>
+                <td><code>ddl_in_dml_folder</code> (medium)</td>
+                <td>A SQL file stored under a <code>dml/</code> folder contains DDL (<code>CREATE TABLE</code>, <code>CREATE VIEW</code>, or <code>ALTER TABLE</code>). The expected folder structure is <code>bq/&lt;dataset&gt;/ddl/</code> for DDL and <code>bq/&lt;dataset&gt;/dml/</code> for DML.</td>
+              </tr>
             </tbody>
           </table></div>
         </div>
@@ -658,8 +675,14 @@ flowchart TD
             <tr>
               <td><strong>Job Run Status</strong></td>
               <td>OPS</td>
-              <td>Did all six jobs run successfully today? How many repos were processed, succeeded, failed, or skipped? How long did each run take?</td>
-              <td><code>env_drift_job_summary</code> view + custom query on <code>executions</code></td>
+              <td>Did all six jobs run successfully today? How many repos were processed, succeeded, failed, or skipped? How long did each run take? Did each job actually process meaningful work (non-zero repos/datasets)?</td>
+              <td>
+                <code>env_drift_job_summary</code> (env drift stats)<br>
+                <code>commit_drift_job_summary</code> (commit drift stats)<br>
+                <code>file_drift_job_summary</code> (file drift stats)<br>
+                <code>orphan_datasets_job_summary</code> (orphan datasets stats)<br>
+                + custom query on <code>executions</code>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -681,6 +704,15 @@ flowchart TD
           <tr><td><code>in_env_not_in_code</code></td><td>Objects deployed that have no git definition</td><td>Shadow objects &mdash; created manually or by a process not tracked in git. Should be codified or removed.</td></tr>
           <tr><td><code>in_code_not_in_env</code></td><td>Objects defined in git but not yet deployed</td><td>Pending deployments. Normal during a release but concerning if persistent for days.</td></tr>
           <tr><td><code>content_mismatch</code></td><td>Objects that exist in both but differ</td><td>Schema has drifted post-deploy. Most critical &mdash; production is running code different from the repo.</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Convention check findings</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Status</th><th>Flag required</th><th>Description</th><th>How to interpret</th></tr></thead>
+        <tbody>
+          <tr><td><code>misplaced_ddl</code></td><td><code>--check-misplaced-ddl</code></td><td>SQL file contains DDL for an object that does not match the filename</td><td>The file is misnamed or contains DDL for the wrong object. Rename the file so it matches the object name, or move the DDL into the correct file.</td></tr>
+          <tr><td><code>ddl_in_dml_folder</code></td><td><code>--check-ddl-in-dml-folder</code></td><td>DDL statement found in a file stored under a <code>dml/</code> folder</td><td>Move the file to the sibling <code>ddl/</code> folder. DDL and DML should be separated so deployments can target each folder independently.</td></tr>
         </tbody>
       </table></div>
 
@@ -802,6 +834,18 @@ flowchart TD
             <td>executions table &mdash; check <code>status = skipped</code> rows</td>
             <td><span class="pill amber">&#9888;&#65039; Investigate</span></td>
             <td>Repos are skipped when the GitLab clone fails or the repo has no recognisable DDL/dbt structure. Check if a new repo type was added that the scanner doesn&rsquo;t recognise.</td>
+          </tr>
+          <tr class="action-row-amber">
+            <td><strong>Job status = success but repos_processed = 0</strong><br><small>commit drift or file drift</small></td>
+            <td>Job Status page &rarr; commit_drift / file_drift stats table &rarr; repos_processed column</td>
+            <td><span class="pill amber">&#9888;&#65039; Investigate</span></td>
+            <td>The job completed without error but processed no repositories. Most likely cause: GitLab clone failed silently, or the <code>SUBGROUP_ROOT</code> returned an empty repo list. Check Cloud Run logs for clone errors or empty repo iterations.</td>
+          </tr>
+          <tr class="action-row-amber">
+            <td><strong>Job status = success but orphan_datasets_found = 0</strong><br><small>for orphan datasets</small></td>
+            <td>Job Status page &rarr; orphan datasets stats table</td>
+            <td><span class="pill amber">&#9888;&#65039; Verify</span></td>
+            <td>Zero orphans is possible but should be cross-checked against the previous run. If the count dropped sharply (e.g. from 30 to 0), check Cloud Run logs — this may indicate the dataset scan step failed rather than a genuine cleanup.</td>
           </tr>
           <tr class="action-row-green">
             <td><strong>All jobs = success, management dashboard all green</strong></td>

@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DevOps Drift Reports — Operator Runbook</title>
+<style>
+  :root {
+    --blue: #0052CC;
+    --blue-light: #E6F0FF;
+    --blue-mid: #4C9AFF;
+    --navy: #172B4D;
+    --grey-dark: #42526E;
+    --grey-mid: #6B778C;
+    --grey-light: #DFE1E6;
+    --grey-bg: #F4F5F7;
+    --white: #FFFFFF;
+    --red: #DE350B;
+    --red-light: #FFEBE6;
+    --amber: #FF8B00;
+    --amber-light: #FFF7D6;
+    --green: #00875A;
+    --green-light: #E3FCEF;
+    --border: #DFE1E6;
+    --shadow: 0 1px 3px rgba(9,30,66,.13);
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    --radius: 4px;
+    --bg: #FFFFFF;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --blue: #4C9AFF;
+      --blue-light: #1C2A3F;
+      --blue-mid: #4C9AFF;
+      --navy: #E6ECF5;
+      --grey-dark: #B8C4D4;
+      --grey-mid: #8C9DB5;
+      --grey-light: #2C3A4F;
+      --grey-bg: #1A2332;
+      --white: #1E2C3D;
+      --red: #FF5630;
+      --red-light: #2C1A14;
+      --amber: #FFAB00;
+      --amber-light: #2C2510;
+      --green: #36B37E;
+      --green-light: #0D2A1F;
+      --border: #2C3A4F;
+      --bg: #141E2B;
+    }
+  }
+  :root[data-theme="dark"] {
+    --blue: #4C9AFF;
+    --blue-light: #1C2A3F;
+    --blue-mid: #4C9AFF;
+    --navy: #E6ECF5;
+    --grey-dark: #B8C4D4;
+    --grey-mid: #8C9DB5;
+    --grey-light: #2C3A4F;
+    --grey-bg: #1A2332;
+    --white: #1E2C3D;
+    --red: #FF5630;
+    --red-light: #2C1A14;
+    --amber: #FFAB00;
+    --amber-light: #2C2510;
+    --green: #36B37E;
+    --green-light: #0D2A1F;
+    --border: #2C3A4F;
+    --bg: #141E2B;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--navy);
+    background: var(--bg);
+  }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Page header ── */
+  .page-header {
+    background: var(--blue);
+    color: #fff;
+    padding: 28px 40px 24px;
+  }
+  .page-header h1 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    margin-bottom: 6px;
+  }
+  .page-header .subtitle {
+    font-size: 14px;
+    opacity: .8;
+    margin-bottom: 12px;
+  }
+  .meta-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    opacity: .85;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255,255,255,.18);
+    border-radius: 3px;
+    padding: 2px 8px;
+  }
+
+  /* ── Layout ── */
+  .layout {
+    display: flex;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+  }
+  .toc-col {
+    width: 230px;
+    flex-shrink: 0;
+    padding: 32px 24px 32px 0;
+  }
+  .toc {
+    position: sticky;
+    top: 20px;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+  }
+  .toc-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--grey-mid);
+    margin-bottom: 10px;
+  }
+  .toc ul { list-style: none; }
+  .toc li { margin: 2px 0; }
+  .toc a {
+    font-size: 13px;
+    color: var(--grey-dark);
+    display: block;
+    padding: 3px 8px;
+    border-radius: var(--radius);
+    border-left: 2px solid transparent;
+  }
+  .toc a:hover { background: var(--grey-bg); color: var(--blue); border-left-color: var(--blue); text-decoration: none; }
+  .toc .toc-sub { padding-left: 16px; }
+  .toc .toc-sub a { font-size: 12px; }
+  .content {
+    flex: 1;
+    min-width: 0;
+    padding: 32px 0 60px 32px;
+    border-left: 1px solid var(--border);
+  }
+
+  /* ── Sections ── */
+  .section { margin-bottom: 48px; }
+  h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--navy);
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--blue);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-wrap: balance;
+  }
+  h2 .icon { font-size: 18px; }
+  h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--navy);
+    margin: 24px 0 10px;
+    text-wrap: balance;
+  }
+  h4 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--grey-dark);
+    margin: 16px 0 6px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  p { margin-bottom: 12px; color: var(--grey-dark); }
+  p:last-child { margin-bottom: 0; }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; margin: 16px 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead th {
+    background: var(--grey-bg);
+    color: var(--navy);
+    font-weight: 700;
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--grey-dark);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--blue-light); }
+  code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--grey-bg);
+    color: var(--red);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  /* ── Callouts ── */
+  .callout {
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin: 16px 0;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .callout-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  .callout-body { flex: 1; }
+  .callout-body strong { display: block; margin-bottom: 4px; font-size: 13px; }
+  .callout-body p { margin: 0; font-size: 13px; }
+  .callout.info { background: var(--blue-light); border-left: 4px solid var(--blue); }
+  .callout.warning { background: var(--amber-light); border-left: 4px solid var(--amber); }
+  .callout.danger { background: var(--red-light); border-left: 4px solid var(--red); }
+  .callout.success { background: var(--green-light); border-left: 4px solid var(--green); }
+
+  /* ── Status pills ── */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 12px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pill.red { background: var(--red-light); color: var(--red); }
+  .pill.green { background: var(--green-light); color: var(--green); }
+  .pill.amber { background: var(--amber-light); color: var(--amber); }
+  .pill.blue { background: var(--blue-light); color: var(--blue); }
+
+  /* ── Signal rows ── */
+  .sig-red td { background: var(--red-light); }
+  .sig-amber td { background: var(--amber-light); }
+  .sig-green td { background: var(--green-light); }
+  .sig-red:hover td { background: #f5c5bc !important; }
+  .sig-amber:hover td { background: #ffe0a0 !important; }
+  .sig-green:hover td { background: #c4f0da !important; }
+
+  /* ── Daily checklist ── */
+  .check-sequence {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 20px 0;
+    position: relative;
+  }
+  .check-sequence::before {
+    content: '';
+    position: absolute;
+    left: 20px;
+    top: 28px;
+    bottom: 28px;
+    width: 2px;
+    background: var(--border);
+    z-index: 0;
+  }
+  .check-step {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 12px 0;
+    position: relative;
+    z-index: 1;
+  }
+  .step-num {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--blue);
+    color: #fff;
+    font-weight: 700;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .step-body {
+    flex: 1;
+    padding-top: 8px;
+  }
+  .step-body strong { color: var(--navy); font-size: 14px; display: block; margin-bottom: 3px; }
+  .step-body p { margin: 0; font-size: 13px; color: var(--grey-dark); }
+
+  /* ── Dashboard cards ── */
+  .dashboard-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 20px 0;
+    overflow: hidden;
+  }
+  .dashboard-card-header {
+    background: var(--navy);
+    color: #fff;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .dashboard-card-header h3 { color: #fff; margin: 0; font-size: 14px; }
+  .dashboard-card-body { padding: 16px; }
+
+  /* ── Quick-ref cards ── */
+  .problem-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .problem-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .problem-card-head {
+    padding: 10px 14px;
+    font-weight: 700;
+    font-size: 13px;
+    color: #fff;
+  }
+  .problem-card-head.red { background: var(--red); }
+  .problem-card-head.amber { background: var(--amber); }
+  .problem-card-body {
+    padding: 12px 14px;
+    background: var(--white);
+  }
+  .problem-card-body p { font-size: 13px; margin-bottom: 8px; color: var(--grey-dark); }
+  .problem-card-body ul { padding-left: 18px; }
+  .problem-card-body li { font-size: 13px; color: var(--grey-dark); margin-bottom: 4px; }
+
+  /* ── Escalation table ── */
+  .escalation-strip {
+    background: var(--blue-light);
+    border: 1px solid var(--blue-mid);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin: 16px 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+  }
+  .esc-item strong { font-size: 13px; color: var(--navy); display: block; margin-bottom: 4px; }
+  .esc-item p { font-size: 12px; color: var(--grey-dark); margin: 0; }
+
+  /* ── Separator ── */
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .toc-col { display: none; }
+    .content { border-left: none; padding-left: 0; }
+    .layout { padding: 0 16px; }
+    .page-header { padding: 20px 16px; }
+    .escalation-strip { grid-template-columns: 1fr; }
+    .check-sequence::before { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>DevOps Drift Reports — Operator Runbook</h1>
+  <p class="subtitle">Daily monitoring guide for Looker Studio dashboards — what to check, what signals mean trouble, and how to respond.</p>
+  <div class="meta-row">
+    <span class="badge">&#128197; Last updated: September 2026</span>
+    <span class="badge">&#128101; Audience: OPS team</span>
+    <span class="badge">&#127968; Telefónica Germany / Capgemini</span>
+    <span class="badge">&#128274; Internal</span>
+  </div>
+</div>
+
+<div class="layout">
+  <nav class="toc-col">
+    <div class="toc">
+      <div class="toc-title">On this page</div>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#daily">Daily check sequence</a></li>
+        <li><a href="#dashboards">Dashboard guidance</a>
+          <ul class="toc-sub">
+            <li><a href="#d-management">Management Dashboard</a></li>
+            <li><a href="#d-jobstatus">Job Run Status</a></li>
+            <li><a href="#d-env-prod">Env Drift — Prod</a></li>
+            <li><a href="#d-env-test">Env Drift — Test &amp; Dev</a></li>
+            <li><a href="#d-commit">Commit Drift</a></li>
+            <li><a href="#d-file">File Drift</a></li>
+            <li><a href="#d-orphan">Orphan Datasets</a></li>
+          </ul>
+        </li>
+        <li><a href="#problems">Common problems</a></li>
+        <li><a href="#escalation">Escalation</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main class="content">
+
+    <!-- Overview -->
+    <section class="section" id="overview">
+      <h2><span class="icon">&#128203;</span>Overview</h2>
+      <p>The DevOps Drift Reports system runs six Cloud Run Jobs every morning between 05:00 and 05:50 Berlin time. By 06:10 all jobs will have completed, and the Looker Studio dashboards will reflect the latest results. This runbook tells you what to look at each morning, what a normal state looks like, and what to do when something is wrong.</p>
+
+      <div class="callout info">
+        <span class="callout-icon">&#8505;&#65039;</span>
+        <div class="callout-body">
+          <strong>Four report types, eight dashboards</strong>
+          <p>The system monitors four types of drift: BigQuery schema differences (<strong>Env Drift</strong>), missing commits between branches (<strong>Commit Drift</strong>), file content differences between branches (<strong>File Drift</strong>), and BigQuery datasets with no code ownership (<strong>Orphan Datasets</strong>). The eight dashboards surface these at different levels of detail.</p>
+        </div>
+      </div>
+
+      <div class="callout warning">
+        <span class="callout-icon">&#9888;&#65039;</span>
+        <div class="callout-body">
+          <strong>Important: always verify the data is fresh</strong>
+          <p>Before acting on any finding, confirm the dashboard is showing today's run. Check the <strong>execution_ts</strong> or <strong>Run date</strong> filter in the dashboard. If the latest row is from a previous day, one or more jobs may not have run — go to Job Run Status first.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Daily check sequence -->
+    <section class="section" id="daily">
+      <h2><span class="icon">&#9989;</span>Daily check sequence</h2>
+      <p>Perform this sequence each morning after 06:10 Berlin time. The whole check takes 5&ndash;10 minutes when everything is healthy.</p>
+
+      <div class="check-sequence">
+        <div class="check-step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <strong>Open Job Run Status dashboard</strong>
+            <p>Verify all six jobs show <code>status = success</code> and ran today. Check that <code>repos_processed &gt; 0</code> for commit drift and file drift. A job that succeeded but processed zero repos is a silent failure — treat it as a failed job.</p>
+          </div>
+        </div>
+        <div class="check-step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <strong>Open the Management Dashboard</strong>
+            <p>Scan the red/green health grid. Any red cell in the <strong>Red flags</strong> column (commit drift) requires immediate action. Other red cells should be noted and investigated using the detailed dashboards.</p>
+          </div>
+        </div>
+        <div class="check-step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <strong>If red flags &gt; 0 → open Commit Drift dashboard</strong>
+            <p>Find the affected repository. Confirm the drift direction (see the directions table in the solution design). Notify the relevant DEV team to open a merge request. Log the incident.</p>
+          </div>
+        </div>
+        <div class="check-step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <strong>Check Env Drift Summary — Prod for high-severity findings</strong>
+            <p>Filter for <code>severity = high</code>. Any high-severity env drift finding in production means a deployed schema differs critically from the code definition. Escalate to the DEV lead for the affected product.</p>
+          </div>
+        </div>
+        <div class="check-step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <strong>Review Orphan Datasets for new high-risk entries</strong>
+            <p>Check for any dataset with <code>risk_score &gt; 75</code> that was not in yesterday's report. Contact the dataset owner to confirm whether it is safe to delete or needs a code definition added.</p>
+          </div>
+        </div>
+        <div class="check-step">
+          <div class="step-num">6</div>
+          <div class="step-body">
+            <strong>All clear — record in the daily log</strong>
+            <p>If no red flags, no high-severity env drift, and all jobs ran successfully, record a brief status update in the OPS daily log and close the check.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Dashboard guidance -->
+    <section class="section" id="dashboards">
+      <h2><span class="icon">&#128202;</span>Dashboard guidance</h2>
+
+      <!-- Management Dashboard -->
+      <div class="dashboard-card" id="d-management">
+        <div class="dashboard-card-header">
+          <h3>Management Dashboard — Discrepancy status in repositories</h3>
+          <span class="pill blue">Daily start point</span>
+        </div>
+        <div class="dashboard-card-body">
+          <p>This is the <strong>first dashboard to open each morning</strong>. It shows a red/green health grid — one row per repository, one column per report type. It is designed to answer "is anything broken today?" with a single glance.</p>
+          <h4>What to look at</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Element</th><th>Meaning</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Red flags column</strong></td><td>Commits in production or test that are missing from master. Must always be 0.</td><td><span class="pill red">&#128680; Immediate</span> — open Commit Drift dashboard for the affected repo.</td></tr>
+              <tr><td><strong>Red cells in Env Drift columns</strong></td><td>High-severity BigQuery schema drift found in that environment for that repo.</td><td>Open Env Drift Summary for the relevant environment and locate the specific findings.</td></tr>
+              <tr><td><strong>All green</strong></td><td>No new critical drift across any dimension today.</td><td>No action needed. Record in daily log.</td></tr>
+              <tr><td><strong>Stale "Last run" date</strong></td><td>A report type did not run today — the grid is showing yesterday's (or older) data.</td><td>Check Job Run Status for a failed or missing job execution.</td></tr>
+            </tbody>
+          </table></div>
+          <div class="callout warning" style="margin-top:12px;">
+            <span class="callout-icon">&#9888;&#65039;</span>
+            <div class="callout-body">
+              <strong>Green does not mean "no drift" — it means "no critical drift"</strong>
+              <p>The management dashboard aggregates at a high level. Medium and low severity findings are rolled up into amber or hidden. Always follow up with the detailed dashboards if you see amber cells or if the dev team reports a concern.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Job Run Status -->
+      <div class="dashboard-card" id="d-jobstatus">
+        <div class="dashboard-card-header">
+          <h3>Job Run Status</h3>
+          <span class="pill amber">Infrastructure health check</span>
+        </div>
+        <div class="dashboard-card-body">
+          <p>Shows per-run statistics for all four report types, sourced from the four job-summary BigQuery views. This is the most important dashboard for detecting infrastructure problems — a job that "succeeded" but did no work is just as problematic as a failed one.</p>
+          <h4>Signal table — env drift stats</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Signal</th><th>Severity</th><th>What it means</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr class="sig-red"><td><code>status = failed</code></td><td><span class="pill red">&#128680; Critical</span></td><td>The job crashed or the Cloud Run container exited with an error.</td><td>Open Cloud Run logs in GCP Console (<code>tefde-gcp-fastoss-dev-gke</code> → Cloud Run → Jobs). Common causes: GitLab token expired, IAM missing, network timeout.</td></tr>
+              <tr class="sig-amber"><td><code>repos_success = 0</code> with <code>repos_found &gt; 0</code></td><td><span class="pill amber">&#9888;&#65039; Investigate</span></td><td>Repos were found but none completed successfully — possibly all clones failed.</td><td>Check Cloud Run logs for "clone failed" or authentication error messages.</td></tr>
+              <tr class="sig-amber"><td>Row is missing for today</td><td><span class="pill amber">&#9888;&#65039; Investigate</span></td><td>The job did not write an execution record — it may not have run at all, or crashed before the first write.</td><td>Check Cloud Scheduler in GCP Console: did the HTTP trigger fire? If yes, check Cloud Run logs.</td></tr>
+              <tr class="sig-green"><td><code>status = success</code>, <code>repos_found</code> &ge; expected</td><td><span class="pill green">&#10003; OK</span></td><td>Job ran and processed the expected number of repos.</td><td>None.</td></tr>
+            </tbody>
+          </table></div>
+          <h4>Signal table — commit drift &amp; file drift stats</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Signal</th><th>Severity</th><th>What it means</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr class="sig-red"><td><code>repos_processed = 0</code> with <code>status = success</code></td><td><span class="pill red">&#128680; Silent failure</span></td><td>The job reported success but touched no repositories. The GitLab clone loop likely failed before processing any repo.</td><td>Check Cloud Run logs for the job execution. Look for errors fetching the subgroup repo list or cloning the first repo. This is the most dangerous failure mode — dashboards look healthy but all data is stale.</td></tr>
+              <tr class="sig-amber"><td><code>repos_missing_branch</code> &gt; expected</td><td><span class="pill amber">&#9888;&#65039; Monitor</span></td><td>More repos than usual don't have one of the monitored branches (master / production / test).</td><td>Acceptable for demo or archived projects. If a production repo suddenly shows <code>missing_branch</code>, verify the branch wasn't accidentally deleted.</td></tr>
+              <tr class="sig-green"><td><code>repos_processed &gt; 0</code>, <code>status = success</code></td><td><span class="pill green">&#10003; OK</span></td><td>Job ran and processed repositories.</td><td>None.</td></tr>
+            </tbody>
+          </table></div>
+          <h4>Signal table — orphan datasets stats</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Signal</th><th>Severity</th><th>What it means</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr class="sig-red"><td>Count drops sharply to 0 in one run</td><td><span class="pill red">&#128680; Verify</span></td><td>Either a mass cleanup was completed (good), or the dataset scan failed silently (bad).</td><td>Compare with the previous run. If no cleanup was planned, check Cloud Run logs for BigQuery INFORMATION_SCHEMA query errors.</td></tr>
+              <tr class="sig-amber"><td><code>high_risk_datasets &gt; 0</code> and persistent for &gt; 3 days</td><td><span class="pill amber">&#9888;&#65039; Escalate</span></td><td>High-risk orphans are not being addressed.</td><td>Check whether the dataset owner was notified. If yes and no action taken, escalate to data platform team lead.</td></tr>
+              <tr class="sig-green"><td>Count stable, <code>high_risk_datasets = 0</code></td><td><span class="pill green">&#10003; OK</span></td><td>No new high-risk orphans.</td><td>None.</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- Env Drift Prod -->
+      <div class="dashboard-card" id="d-env-prod">
+        <div class="dashboard-card-header">
+          <h3>Environment Drift Summary — Production</h3>
+          <span class="pill red">Highest priority</span>
+        </div>
+        <div class="dashboard-card-body">
+          <p>Shows per-repository schema drift against the production GCP project. Production drift findings require prompt attention because they indicate that what is running in prod does not match what is defined in source code.</p>
+          <h4>What to look at</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Signal</th><th>Severity</th><th>Meaning</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr class="sig-red"><td><code>content_mismatch</code>, severity = high</td><td><span class="pill red">&#128680; Critical</span></td><td>A deployed table or view differs critically from its code definition — schema types mismatch or a column is missing.</td><td>Notify the DEV lead for the affected product immediately. Include the object name, dataset, and the finding detail. A production schema mismatch can cause job failures.</td></tr>
+              <tr class="sig-red"><td><code>only_in_env</code> (object has no code)</td><td><span class="pill red">&#128680; Investigate</span></td><td>An object exists in production BigQuery but has no corresponding DDL in git. It was created manually or by an undocumented process.</td><td>Identify the owner and ask them to either add DDL to the repo or submit a removal request. Do not delete without owner confirmation.</td></tr>
+              <tr class="sig-amber"><td><code>only_in_source</code> (object not yet deployed)</td><td><span class="pill amber">&#9888;&#65039; Monitor</span></td><td>DDL exists in git but the object is not deployed in production. Normal within 24 hours of a release.</td><td>If persistent for &gt; 2 days after a release, ask the DEV team whether the deployment succeeded.</td></tr>
+              <tr class="sig-amber"><td><code>definition_mismatch</code>, severity = medium</td><td><span class="pill amber">&#9888;&#65039; Notify DEV</span></td><td>A view's SQL differs between git and deployed. Often a whitespace or formatting difference, but may indicate an out-of-band modification.</td><td>Share the finding detail with the DEV team. They will confirm whether the deployed version or the git version is canonical.</td></tr>
+              <tr class="sig-green"><td>No findings for all repos</td><td><span class="pill green">&#10003; OK</span></td><td>All objects in production match their code definitions.</td><td>None.</td></tr>
+            </tbody>
+          </table></div>
+          <div class="callout info" style="margin-top:12px;">
+            <span class="callout-icon">&#128196;</span>
+            <div class="callout-body">
+              <strong>Linking to the detailed report</strong>
+              <p>Each row in the env drift summary has a <strong>Report link</strong> column containing a direct link to the <code>report.md</code> file for that run, stored in GCS. Click the link to see the full human-readable breakdown of all findings for that repo and execution.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Env Drift Test/Dev -->
+      <div class="dashboard-card" id="d-env-test">
+        <div class="dashboard-card-header">
+          <h3>Environment Drift Summary — Test &amp; Dev</h3>
+          <span class="pill amber">Lower priority than prod</span>
+        </div>
+        <div class="dashboard-card-body">
+          <p>Same structure as the Prod dashboard, but targeting the test and dev environments. Findings here are lower priority — they indicate pre-production misalignment but do not directly affect production users.</p>
+          <h4>Key differences from prod</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Signal</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td>High severity finding in test</td><td>Notify the DEV team — this will block promotion to production if not resolved. Not an emergency but should be addressed before the next release cut.</td></tr>
+              <tr><td>High severity finding in dev</td><td>Informational for the DEV team. Low urgency. Track and include in the next sprint review if persistent.</td></tr>
+              <tr><td>All repos have <code>only_in_source</code> findings</td><td>Normal when a feature branch has been merged but the test environment has not been re-deployed. If it persists for more than 1 week, prompt the DEV team about the deployment state.</td></tr>
+              <tr><td>All findings suddenly zero (when they previously had some)</td><td>Verify that the job ran successfully and cloned repos correctly — an empty finding set after a long period of findings may indicate a scan failure, not a cleanup.</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- Commit Drift -->
+      <div class="dashboard-card" id="d-commit">
+        <div class="dashboard-card-header">
+          <h3>Commit Drift</h3>
+          <span class="pill red">Red flags = zero-tolerance</span>
+        </div>
+        <div class="dashboard-card-body">
+          <p>Shows commits present in one branch but absent from another. The dashboard includes a <strong>Commit Staleness</strong> table showing how many days the oldest unmerged commit has been waiting — this makes slow-accumulating drift visible before it becomes critical.</p>
+          <h4>Direction reference — which are the critical ones</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Direction</th><th>Critical?</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr class="sig-red"><td><code>production not in master</code></td><td><span class="pill red">&#128680; Must be 0</span></td><td>A commit was applied to production without going through master. Hotfix process failure.</td></tr>
+              <tr class="sig-red"><td><code>production not in test</code></td><td><span class="pill red">&#128680; Must be 0</span></td><td>Production has code that was never tested.</td></tr>
+              <tr class="sig-red"><td><code>test not in master</code></td><td><span class="pill red">&#128680; Must be 0</span></td><td>Test environment has commits never merged to master — risk of losing work.</td></tr>
+              <tr class="sig-green"><td><code>master not in production</code></td><td><span class="pill green">&#10003; Expected</span></td><td>Features merged but not yet released. Normal before a release cut.</td></tr>
+              <tr class="sig-green"><td><code>master not in test</code></td><td><span class="pill green">&#10003; Expected</span></td><td>Features on master not yet promoted to test. Normal.</td></tr>
+              <tr class="sig-green"><td><code>test not in production</code></td><td><span class="pill green">&#10003; Expected</span></td><td>Features tested, awaiting production release. Normal.</td></tr>
+            </tbody>
+          </table></div>
+          <h4>Staleness table — when to escalate</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Staleness</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><code>oldest_unmerged_days</code> &lt; 7 days</td><td>Monitor. Likely pending the next release cycle.</td></tr>
+              <tr><td><code>oldest_unmerged_days</code> 7&ndash;30 days</td><td>Notify the repo owner. Confirm whether the drift is intentional (e.g. a long-running feature branch).</td></tr>
+              <tr><td><code>oldest_unmerged_days</code> &gt; 30 days</td><td>Escalate to the DEV lead. Drift this old usually indicates a forgotten merge request or a process failure.</td></tr>
+            </tbody>
+          </table></div>
+          <div class="callout info">
+            <span class="callout-icon">&#128197;</span>
+            <div class="callout-body">
+              <strong>Use the Run date dropdown</strong>
+              <p>The dashboard includes a <em>Run date</em> filter. When investigating historical drift, always select the specific date you want rather than relying on the default — the default shows the most recent run, which may have resolved drift that was present earlier and that you are trying to verify.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- File Drift -->
+      <div class="dashboard-card" id="d-file">
+        <div class="dashboard-card-header">
+          <h3>File Content Drift</h3>
+          <span class="pill amber">Complements commit drift</span>
+        </div>
+        <div class="dashboard-card-body">
+          <p>Detects file-level differences between branches regardless of commit history. This catches out-of-band modifications (force-pushes, direct edits) that would not show up in commit drift.</p>
+          <h4>What to look at</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Signal</th><th>Severity</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr class="sig-red"><td><code>files_deleted</code> in production &gt; 0 (not in master)</td><td><span class="pill red">&#128680; Investigate</span></td><td>A file was deleted in production that still exists in master. This is a strong signal of an untracked change. Notify the DEV lead — the file may need to be restored or the deletion needs to be committed to master.</td></tr>
+              <tr class="sig-amber"><td>Large <code>files_modified</code> count with low commit drift</td><td><span class="pill amber">&#9888;&#65039; Investigate</span></td><td>Files differ but there are few or no commits explaining the difference. Could indicate a force-push or rebase that rewrote history. Correlate with commit drift for the same repo and direction.</td></tr>
+              <tr class="sig-amber"><td>High <code>unique_files</code> count increasing day-over-day</td><td><span class="pill amber">&#9888;&#65039; Monitor</span></td><td>File divergence is growing, suggesting an active branch that is not being merged back. Alert the repo owner.</td></tr>
+              <tr class="sig-green"><td>Low <code>unique_files</code> count, all in <code>master not in production</code></td><td><span class="pill green">&#10003; Normal</span></td><td>Pending release. No action needed.</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <!-- Orphan Datasets -->
+      <div class="dashboard-card" id="d-orphan">
+        <div class="dashboard-card-header">
+          <h3>Orphan Datasets</h3>
+          <span class="pill amber">Governance &amp; cost</span>
+        </div>
+        <div class="dashboard-card-body">
+          <p>Lists BigQuery datasets in the production project that have no corresponding source code definition. These represent both storage cost and governance risk — they may contain production data with no ownership trail.</p>
+          <h4>What to look at</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Signal</th><th>Severity</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr class="sig-red"><td><code>risk_score &gt; 75</code></td><td><span class="pill red">&#128680; Action needed</span></td><td>Identify the dataset owner using the <code>owner</code> field or by searching GitLab for the dataset name. Either request them to add a code definition, or confirm the dataset is unused and schedule deletion. Document the outcome in the OPS log.</td></tr>
+              <tr class="sig-amber"><td>Orphan count increasing week-over-week</td><td><span class="pill amber">&#9888;&#65039; Escalate</span></td><td>New datasets are being created without code definitions faster than they are being cleaned up. Raise with the data platform team lead — this indicates a process gap in the project onboarding workflow.</td></tr>
+              <tr class="sig-amber"><td>New entry with <code>total_storage_mb &gt; 1000</code></td><td><span class="pill amber">&#9888;&#65039; Investigate</span></td><td>A large dataset appeared without a code owner. This has direct cost implications. Investigate immediately — it may be a misconfigured pipeline writing to the wrong dataset.</td></tr>
+              <tr class="sig-green"><td>Count stable or decreasing, no <code>risk_score &gt; 75</code></td><td><span class="pill green">&#10003; OK</span></td><td>Governance is under control. No action needed.</td></tr>
+            </tbody>
+          </table></div>
+          <div class="callout warning">
+            <span class="callout-icon">&#128683;</span>
+            <div class="callout-body">
+              <strong>Never delete a dataset without owner confirmation</strong>
+              <p>The orphan report only confirms absence of a code reference — it cannot confirm the data is unused. Always contact the dataset owner before scheduling deletion. If no owner can be identified within 5 business days, escalate to the data platform team lead.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Common problems -->
+    <section class="section" id="problems">
+      <h2><span class="icon">&#128295;</span>Common problems &amp; quick fixes</h2>
+      <p>These are the most frequently occurring issues and their fastest diagnostic paths.</p>
+
+      <div class="problem-grid">
+        <div class="problem-card">
+          <div class="problem-card-head red">Job failed — Cloud Run error</div>
+          <div class="problem-card-body">
+            <p><strong>Symptoms:</strong> Job Run Status shows <code>status = failed</code>.</p>
+            <p><strong>Check in GCP Console:</strong></p>
+            <ul>
+              <li>Navigate to <code>tefde-gcp-fastoss-dev-gke</code> → Cloud Run → Jobs</li>
+              <li>Find the failed job → Executions tab → View logs</li>
+              <li>Search for <code>ERROR</code> or <code>Exception</code></li>
+            </ul>
+            <p><strong>Common causes:</strong></p>
+            <ul>
+              <li>GitLab token expired → renew in Secret Manager</li>
+              <li>IAM binding removed → check <code>IAM_admin_instructions.md</code></li>
+              <li>BigQuery quota exceeded → check BQ quota dashboard</li>
+              <li>Network timeout → job retries once automatically</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="problem-card">
+          <div class="problem-card-head red">Job succeeded but repos_processed = 0</div>
+          <div class="problem-card-body">
+            <p><strong>Symptoms:</strong> Job Run Status shows success but <code>repos_processed = 0</code> for commit drift or file drift.</p>
+            <p><strong>Check in Cloud Run logs:</strong></p>
+            <ul>
+              <li>Look for "Could not list repositories" or "Empty subgroup"</li>
+              <li>Check whether <code>SUBGROUP_ROOT</code> env variable is set correctly</li>
+              <li>Look for authentication errors fetching the GitLab API</li>
+            </ul>
+            <p><strong>Action:</strong> Treat as a failed run. The dashboard data is stale. Fix the root cause and trigger a manual re-run.</p>
+          </div>
+        </div>
+
+        <div class="problem-card">
+          <div class="problem-card-head red">Dashboard shows no data for today</div>
+          <div class="problem-card-body">
+            <p><strong>Symptoms:</strong> Dashboard has no rows for today's date; still showing yesterday's data.</p>
+            <p><strong>Check:</strong></p>
+            <ul>
+              <li>Cloud Scheduler → did the trigger fire at the scheduled time?</li>
+              <li>If trigger fired, check Cloud Run logs for a startup failure</li>
+              <li>If trigger did not fire, check if the schedule is paused</li>
+            </ul>
+            <p><strong>Action:</strong> Trigger the job manually from Cloud Run Console → Run now. Then re-check the dashboard after 20 minutes.</p>
+          </div>
+        </div>
+
+        <div class="problem-card">
+          <div class="problem-card-head amber">Orphan count dropped to 0 unexpectedly</div>
+          <div class="problem-card-body">
+            <p><strong>Symptoms:</strong> Yesterday showed 25 orphans, today shows 0 and no cleanup was planned.</p>
+            <p><strong>Check:</strong></p>
+            <ul>
+              <li>Cloud Run logs for BQ INFORMATION_SCHEMA errors</li>
+              <li>Check whether the <code>orphan_datasets</code> table was written at all (query directly in BQ)</li>
+            </ul>
+            <p><strong>Action:</strong> If the scan failed silently, trigger a manual re-run. If the table was written but shows 0 rows, escalate to the DEV team to investigate the detection logic.</p>
+          </div>
+        </div>
+
+        <div class="problem-card">
+          <div class="problem-card-head amber">All env_drift findings suddenly zero</div>
+          <div class="problem-card-body">
+            <p><strong>Symptoms:</strong> A repo that had persistent drift findings suddenly shows 0 findings, but no deployment was made.</p>
+            <p><strong>Check:</strong></p>
+            <ul>
+              <li>Verify the <code>execution_ts</code> — did the job run at all?</li>
+              <li>Check <code>status</code> in the executions table for that repo</li>
+              <li>Look for <code>status = skipped</code> — the branch may be gone</li>
+            </ul>
+            <p><strong>Action:</strong> If <code>status = skipped</code>, the production branch no longer exists in that repo. Confirm with the DEV team.</p>
+          </div>
+        </div>
+
+        <div class="problem-card">
+          <div class="problem-card-head amber">Management dashboard all-green but something feels wrong</div>
+          <div class="problem-card-body">
+            <p><strong>Symptoms:</strong> Grid is all green, but a DEV team member reports a known issue that should appear.</p>
+            <p><strong>Check:</strong></p>
+            <ul>
+              <li>Is the dashboard date filter set to today?</li>
+              <li>Was <code>repos_processed &gt; 0</code> for the relevant report type?</li>
+              <li>Is the issue in a <em>medium</em> or <em>low</em> severity finding (these may not turn the cell red)?</li>
+            </ul>
+            <p><strong>Action:</strong> Open the detailed dashboard for the relevant report type and filter to the specific repo and date.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Escalation -->
+    <section class="section" id="escalation">
+      <h2><span class="icon">&#128222;</span>Escalation contacts</h2>
+      <p>Use these escalation paths when a finding requires action beyond the OPS team's scope or has been unresolved for more than one business day.</p>
+
+      <div class="escalation-strip">
+        <div class="esc-item">
+          <strong>&#128680; Production schema drift (high severity)</strong>
+          <p>Escalate to the <strong>DEV lead</strong> for the affected data product. Include the object name, the drift category, and the GCS report link from the env_drift dashboard.</p>
+        </div>
+        <div class="esc-item">
+          <strong>&#128680; Red flag commits (production not in master)</strong>
+          <p>Escalate to the <strong>DEV lead</strong> and <strong>Release manager</strong> for the affected repo. This must be resolved before the next production deployment.</p>
+        </div>
+        <div class="esc-item">
+          <strong>&#9888;&#65039; Infrastructure failure (job not running)</strong>
+          <p>Escalate to the <strong>DevOps platform team</strong> if the job continues to fail after a manual re-trigger. Include the Cloud Run log excerpt and error message.</p>
+        </div>
+        <div class="esc-item">
+          <strong>&#9888;&#65039; High-risk orphan dataset (&gt; 75 score)</strong>
+          <p>Contact the <strong>dataset owner</strong> first. If owner cannot be identified within 2 business days, escalate to the <strong>data platform team lead</strong>.</p>
+        </div>
+        <div class="esc-item">
+          <strong>&#9888;&#65039; GitLab token expired</strong>
+          <p>Request a new token from the GitLab group owner and update it in <strong>Secret Manager</strong> (<code>gitlab-token</code> in <code>tefde-gcp-fastoss-dev-gke</code>). Inform the DevOps platform team.</p>
+        </div>
+        <div class="esc-item">
+          <strong>&#128203; IAM grant missing</strong>
+          <p>Consult <code>IAM_admin_instructions.md</code> for the required grant. Submit the IAM change request to the <strong>TEF IAM Team</strong>. They manage the <code>devops-reports-runner</code> service account.</p>
+        </div>
+      </div>
+
+      <div class="callout success" style="margin-top: 20px;">
+        <span class="callout-icon">&#9989;</span>
+        <div class="callout-body">
+          <strong>When everything is healthy</strong>
+          <p>A typical all-clear check: Job Run Status shows 6 success rows with repos_processed &gt; 0 for commit/file drift. Management dashboard is all green. No high-risk orphans. Record "All drift reports healthy — [date]" in the OPS log and close the daily check.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const el = document.querySelector(a.getAttribute('href'));
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+</body>
+</html>
