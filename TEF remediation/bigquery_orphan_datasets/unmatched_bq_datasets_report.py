@@ -450,6 +450,7 @@ def main() -> int:
     status = "success"
     bq_client = None
     gcs_path: str | None = None
+    datasets_scanned = 0
     execution_id = os.environ.get("EXECUTION_ID")
     if not execution_id:
         raise ValueError("EXECUTION_ID must be set")
@@ -483,7 +484,8 @@ def main() -> int:
             for dataset in list_datasets(token, args.project_id)
             if include_regex.search(dataset) and not (exclude_regex and exclude_regex.search(dataset))
         ]
-        log("INFO", "Datasets after filters", count=len(all_datasets))
+        datasets_scanned = len(all_datasets)
+        log("INFO", "Datasets after filters", count=datasets_scanned)
 
         repo_refs, dataset_to_repos = collect_repo_dataset_references(subgroup_root, args.git_ref)
 
@@ -651,6 +653,7 @@ def main() -> int:
                 "status": status,
                 "duration_seconds": duration_seconds,
                 "gcs_path": gcs_path,
+                "repos_total": datasets_scanned,
             }],
         )
 
@@ -674,6 +677,7 @@ def main() -> int:
                     "status": "failed",
                     "duration_seconds": int(time.monotonic() - start_time),
                     "gcs_path": gcs_path,
+                    "repos_total": datasets_scanned,
                 }],
             )
         raise

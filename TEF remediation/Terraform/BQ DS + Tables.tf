@@ -557,6 +557,7 @@ resource "google_bigquery_table" "orphan_datasets_job_summary" {
         e.triggered_by,
         e.status,
         e.duration_seconds,
+        COALESCE(e.repos_total, 0)           AS datasets_scanned,
         COUNT(DISTINCT o.dataset_name)       AS orphan_datasets_found,
         COALESCE(SUM(o.table_count), 0)      AS total_objects_in_orphans,
         COUNT(DISTINCT IF(o.risk_score >= 2, o.dataset_name, NULL)) AS high_risk_datasets
@@ -564,7 +565,7 @@ resource "google_bigquery_table" "orphan_datasets_job_summary" {
       LEFT JOIN `${var.reporting_project_id}.devops_reports.orphan_datasets` o
         USING (execution_id)
       WHERE e.report_type = 'orphan_datasets'
-      GROUP BY 1, 2, 3, 4, 5
+      GROUP BY 1, 2, 3, 4, 5, 6
     EOT
     use_legacy_sql = false
   }
