@@ -1653,6 +1653,20 @@ def parse_args() -> argparse.Namespace:
         default="env-drift",
         help="GCS key prefix for report uploads. Default: env-drift",
     )
+    parser.add_argument(
+        "--check-misplaced-ddl",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Emit misplaced_ddl findings when a file contains DDL for an object "
+             "whose name does not match the filename. Default: disabled.",
+    )
+    parser.add_argument(
+        "--check-ddl-in-dml-folder",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Emit ddl_in_dml_folder findings when DDL (CREATE/ALTER TABLE) is "
+             "stored under a dml folder. Default: disabled.",
+    )
     return parser.parse_args()
 
 
@@ -1769,7 +1783,12 @@ def main() -> int:
             actual_bq = {}
             bq_findings = []
 
-        bq_findings.extend(misplaced_ddl_findings)
+        for _f in misplaced_ddl_findings:
+            if _f["status"] == "misplaced_ddl" and not args.check_misplaced_ddl:
+                continue
+            if _f["status"] == "ddl_in_dml_folder" and not args.check_ddl_in_dml_folder:
+                continue
+            bq_findings.append(_f)
 
         summary = {
             "generated_utc": datetime.now(timezone.utc).isoformat(),
