@@ -1,8 +1,9 @@
 # Building the Job Run Status Dashboard in Looker Studio
 
 This document explains how to build a dashboard that shows the overall status of each
-`env_drift` Cloud Run job execution — how many repositories were processed, how many
-succeeded, and whether any were skipped because they failed to clone.
+Cloud Run job execution across all four report types. The dashboard has four statistics
+tables — one per report — so a silent failure (job succeeded but processed nothing) is
+immediately visible alongside hard failures.
 
 The data comes from the `env_drift_job_summary` BigQuery view, which surfaces the
 job-level summary row written by `entrypoint.sh` at the end of every `env_drift` run.
@@ -345,10 +346,255 @@ The `AND repos_total IS NULL` guard makes both statements safe to re-run.
 
 ---
 
+---
+
+---
+
+# Extending the dashboard — Commit Drift statistics
+
+The `commit_drift_job_summary` BigQuery view provides per-run statistics for the
+`devops-reports-commit-drift` Cloud Run Job. Unlike env_drift, this view derives its
+counts by joining the `executions` table with `branch_drift_kpis` — no summary row is
+written by the script, so the counts are aggregated in the view itself.
+
+## Key signal — repos_processed = 0
+
+If the job reports `status = success` but `repos_processed = 0`, the GitLab clone loop
+silently processed nothing. This is the most dangerous failure mode: the dashboard shows
+green but all data is stale. Always check `repos_processed` first.
+
+## Step 1 — Add the commit drift data source
+
+1. In the existing Job Run Status report, click **Resource → Manage added data sources →
+   Add a data source**.
+2. Choose **BigQuery**.
+3. Navigate: **My Projects → `tefde-gcp-fastoss-dev` → `devops_reports` →
+   `commit_drift_job_summary`**.
+4. Click **Add → Add to Report**.
+5. Name the data source `Commit Drift Job Runs`.
+
+Alternatively, use a Custom Query to get the full history (the view returns all rows):
+
+```sql
+SELECT
+  execution_id,
+  execution_ts,
+  triggered_by,
+  status,
+  duration_seconds,
+  repos_processed,
+  repos_ok,
+  repos_missing_branch,
+  repos_with_drift,
+  repos_high_severity,
+  total_commits_in_drift
+FROM `tefde-gcp-fastoss-dev.devops_reports.commit_drift_job_summary`
+ORDER BY execution_ts DESC
+```
+
+> Leave **"Enable date range parameters" unchecked** (same as env_drift — see Step 1 in
+> the env_drift section above).
+
+## Step 2 — Set field types
+
+1. **Resource → Manage added data sources → pencil icon** on `Commit Drift Job Runs`.
+2. Set `status` to type **Text** / Dimension.
+3. Set all count columns (`repos_processed`, `repos_ok`, `repos_missing_branch`,
+   `repos_with_drift`, `repos_high_severity`, `total_commits_in_drift`) to type
+   **Number**, aggregation **No aggregation** (or **MAX** if used as scorecards).
+4. Click **Done → Close**.
+
+## Step 3 — Add the statistics table
+
+1. **Insert → Table**.
+2. Data source: `Commit Drift Job Runs`.
+3. **Dimensions** (keep all as dimensions, no metrics):
+   `execution_ts`, `triggered_by`, `status`, `repos_processed`, `repos_ok`,
+   `repos_missing_branch`, `repos_with_drift`, `repos_high_severity`,
+   `total_commits_in_drift`, `duration_seconds`
+4. **Sort:** `execution_ts` descending.
+5. **Setup panel → Date range dimension:** `execution_ts`.
+
+## Step 4 — Conditional formatting
+
+Add two rules on the `repos_processed` column to highlight the silent-failure case:
+
+| Condition | Format |
+|---|---|
+| `repos_processed` **=** `0` | Background `#FDECEA` (light red), text `#C62828` (dark red), **Bold** |
+| `repos_processed` **>** `0` | Background `#E6F4EA` (light green), text `#1B8A00` (dark green) |
+
+Add the same status colour rules as env_drift (success / failed — commit drift does not
+produce `success_with_warnings`).
+
+## Step 5 — Add a date range control
+
+Re-use the page-level date range control already on the page, or insert a new one bound
+to `execution_ts` and set it to apply to all charts on the page.
+
+## Data source field reference
+
+| Field | Type | Description |
+|---|---|---|
+| `execution_id` | Dimension | Unique ID for this Cloud Run job execution |
+| `execution_ts` | Date dimension | Job start timestamp — use as the date range filter field |
+| `triggered_by` | Dimension | Who triggered the job |
+| `status` | Dimension | `success` or `failed` |
+| `duration_seconds` | Metric | Total elapsed time of the job in seconds |
+| `repos_processed` | Metric | Repositories processed — **0 = silent failure** |
+| `repos_ok` | Metric | Repos where all branch comparisons found no drift |
+| `repos_missing_branch` | Metric | Repos where one or more monitored branches do not exist |
+| `repos_with_drift` | Metric | Repos with at least one commit difference (any severity) |
+| `repos_high_severity` | Metric | Repos with high-severity commit drift |
+| `total_commits_in_drift` | Metric | Total commits present in one branch but missing from another |
+
+---
+
+---
+
+# Extending the dashboard — File Drift statistics
+
+The `file_drift_job_summary` view follows the same pattern as commit drift, but uses
+`drift_type = 'content'` rows from `branch_drift_kpis` and counts files instead of
+commits. It adds a `repos_with_error` column that is not present in commit drift.
+
+## Step 1 — Add the file drift data source
+
+1. **Resource → Manage added data sources → Add a data source → BigQuery**.
+2. Navigate to `tefde-gcp-fastoss-dev → devops_reports → file_drift_job_summary`.
+3. Name the data source `File Drift Job Runs`.
+
+Custom Query alternative:
+
+```sql
+SELECT
+  execution_id,
+  execution_ts,
+  triggered_by,
+  status,
+  duration_seconds,
+  repos_processed,
+  repos_ok,
+  repos_missing_branch,
+  repos_with_error,
+  repos_with_drift,
+  repos_high_severity,
+  total_files_in_drift
+FROM `tefde-gcp-fastoss-dev.devops_reports.file_drift_job_summary`
+ORDER BY execution_ts DESC
+```
+
+## Step 2 — Add the statistics table
+
+Same steps as commit drift (Steps 2–5 above), with these differences:
+
+- Replace `total_commits_in_drift` with `total_files_in_drift` in the dimension list.
+- Add `repos_with_error` as an additional dimension.
+- Add a conditional formatting rule on `repos_with_error`:
+
+| Condition | Format |
+|---|---|
+| `repos_with_error` **>** `0` | Background `#FFF8E1` (light amber), text `#E65100` (orange) |
+
+## Data source field reference
+
+| Field | Type | Description |
+|---|---|---|
+| `execution_id` | Dimension | Unique ID for this Cloud Run job execution |
+| `execution_ts` | Date dimension | Job start timestamp |
+| `triggered_by` | Dimension | Who triggered the job |
+| `status` | Dimension | `success` or `failed` |
+| `duration_seconds` | Metric | Total elapsed time of the job in seconds |
+| `repos_processed` | Metric | Repositories processed — **0 = silent failure** |
+| `repos_ok` | Metric | Repos with no file differences |
+| `repos_missing_branch` | Metric | Repos where a monitored branch does not exist |
+| `repos_with_error` | Metric | Repos where the diff comparison returned an error |
+| `repos_with_drift` | Metric | Repos with at least one file difference |
+| `repos_high_severity` | Metric | Repos with high-severity file drift |
+| `total_files_in_drift` | Metric | Total files differing across all repos and directions |
+
+---
+
+---
+
+# Extending the dashboard — Orphan Datasets statistics
+
+The `orphan_datasets_job_summary` view joins `executions` (report_type = `orphan_datasets`)
+with the `orphan_datasets` table to show per-run orphan counts.
+
+> **Note on coverage:** The view shows counts of *orphan* datasets found, not the total
+> number of datasets scanned. The total-scanned figure is computed in the script but not
+> currently persisted to BigQuery. Until that is added, the "did it do anything" check
+> relies on `status` rather than a `datasets_processed` counter. A sharp drop to 0 orphans
+> should be verified manually if no cleanup was planned.
+
+## Step 1 — Add the orphan datasets data source
+
+1. **Resource → Manage added data sources → Add a data source → BigQuery**.
+2. Navigate to `tefde-gcp-fastoss-dev → devops_reports → orphan_datasets_job_summary`.
+3. Name the data source `Orphan Datasets Job Runs`.
+
+Custom Query alternative:
+
+```sql
+SELECT
+  execution_id,
+  execution_ts,
+  triggered_by,
+  status,
+  duration_seconds,
+  orphan_datasets_found,
+  total_objects_in_orphans,
+  high_risk_datasets
+FROM `tefde-gcp-fastoss-dev.devops_reports.orphan_datasets_job_summary`
+ORDER BY execution_ts DESC
+```
+
+## Step 2 — Add the statistics table
+
+1. **Insert → Table**, data source: `Orphan Datasets Job Runs`.
+2. **Dimensions:** `execution_ts`, `triggered_by`, `status`, `orphan_datasets_found`,
+   `high_risk_datasets`, `total_objects_in_orphans`, `duration_seconds`.
+3. **Sort:** `execution_ts` descending.
+4. **Setup panel → Date range dimension:** `execution_ts`.
+
+## Step 3 — Conditional formatting
+
+| Column | Condition | Format |
+|---|---|---|
+| `status` | Text **is** `success` | Background `#E6F4EA`, text `#1B8A00` |
+| `status` | Text **is** `failed` | Background `#FDECEA`, text `#C62828`, **Bold** |
+| `high_risk_datasets` | Value **>** `0` | Background `#FDECEA`, text `#C62828`, **Bold** |
+| `orphan_datasets_found` | Value **=** `0` | Background `#FFF8E1`, text `#E65100` — verify this is a genuine zero, not a scan failure |
+
+## Step 4 — Add a scorecard for high-risk datasets
+
+A single scorecard prominently showing `high_risk_datasets` (MAX aggregation) for the
+latest run makes the most critical metric visible without opening the table:
+
+1. **Insert → Scorecard**.
+2. Metric: `high_risk_datasets`, Aggregation: **MAX**.
+3. Label: `High-risk orphans today`.
+4. In the **Style** tab, set a conditional colour: if the value is > 0 use red text.
+
+## Data source field reference
+
+| Field | Type | Description |
+|---|---|---|
+| `execution_id` | Dimension | Unique ID for this Cloud Run job execution |
+| `execution_ts` | Date dimension | Job start timestamp |
+| `triggered_by` | Dimension | Who triggered the job |
+| `status` | Dimension | `success` or `failed` |
+| `duration_seconds` | Metric | Total elapsed time of the job in seconds |
+| `orphan_datasets_found` | Metric | Distinct orphan datasets detected in this run |
+| `total_objects_in_orphans` | Metric | Total tables/views across all orphan datasets |
+| `high_risk_datasets` | Metric | Orphan datasets with risk_score ≥ 2 |
+
+---
+
 ## Related
 
 - `Instructions/Building the Looker Studio Dashboards.md` — full multi-page dashboard guide and one-time GCP service account setup
 - `Instructions/Building the Env Drift Summary Dashboard.md` — per-repository env-drift findings table
 - `Instructions/Building the Management Dashboard.md` — executive red/green health grid
-- `TEF remediation/Terraform/BQ DS + Tables.tf` — `env_drift_job_summary` view definition
-- `TEF remediation/entrypoint.sh` — `env_drift` case that writes the job-level summary row
+- `TEF remediation/Terraform/BQ DS + Tables.tf` — all four job-summary view definitions (`env_drift_job_summary`, `commit_drift_job_summary`, `file_drift_job_summary`, `orphan_datasets_job_summary`)
