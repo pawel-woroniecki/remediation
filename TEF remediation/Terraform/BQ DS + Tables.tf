@@ -510,7 +510,17 @@ resource "google_bigquery_table" "file_drift_job_summary" {
         COUNT(DISTINCT IF(k.status = 'missing_branch', k.repo, NULL))                             AS repos_missing_branch,
         COUNT(DISTINCT IF(k.status = 'error',          k.repo, NULL))                             AS repos_with_error,
         COUNT(DISTINCT IF(k.severity != 'none',        k.repo, NULL))                             AS repos_with_drift,
-        COUNT(DISTINCT IF(k.severity = 'high',         k.repo, NULL))                             AS repos_high_severity,
+        -- repos with file changes in a critical direction (same convention as commit_drift):
+        --   production not in master  (left=master,  right=production)
+        --   test not in master        (left=master,  right=test)
+        --   production not in test    (left=test,    right=production)
+        COUNT(DISTINCT IF(
+          k.unique_files > 0 AND (
+            (k.left_branch LIKE '%master%' AND k.right_branch LIKE '%production%') OR
+            (k.left_branch LIKE '%master%' AND k.right_branch LIKE '%test%')       OR
+            (k.left_branch LIKE '%test%'   AND k.right_branch LIKE '%production%')
+          ), k.repo, NULL
+        ))                                                                                          AS repos_critical_drift,
         COALESCE(SUM(k.unique_files), 0)                                                           AS total_files_in_drift
       FROM `${var.reporting_project_id}.devops_reports.executions` e
       LEFT JOIN `${var.reporting_project_id}.devops_reports.branch_drift_kpis` k
