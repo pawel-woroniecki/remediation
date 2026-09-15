@@ -92,6 +92,8 @@ python generate_code_environment_drift_report.py \
 | `--gcp-project-for-substitution` | no | `tefde-gcp-fastoss-prod` | Project qualifier stripped from SQL during DDL normalisation |
 | `--keep-workdir` | no | false | Retain the temp working directory after the run (useful for debugging) |
 | `--gcs-temp-root` | no | `/tmp` | Root path for GCS staging temp files |
+| `--check-misplaced-ddl` / `--no-check-misplaced-ddl` | no | disabled | Emit `misplaced_ddl` findings when a SQL file contains DDL for an object whose name does not match the filename. See [Convention checks](#convention-checks). |
+| `--check-ddl-in-dml-folder` / `--no-check-ddl-in-dml-folder` | no | disabled | Emit `ddl_in_dml_folder` findings when a CREATE TABLE/VIEW or ALTER TABLE statement is stored under a `dml/` folder. See [Convention checks](#convention-checks). |
 
 #### Nexus source mode (`--source-mode nexus`)
 
@@ -125,6 +127,41 @@ python generate_code_environment_drift_report.py \
   `tefde-gcp-fastoss-prod-gke`. See Grant #12 in `IAM_admin_instructions.md`. Without this,
   `stage_gcs_snapshot()` fails with a 403 from `gcloud storage cp`.
 - `curl` available in PATH when using the default REST client
+
+---
+
+## Convention checks
+
+Two optional source-code convention checks are available. Both are **disabled by default** — they do not affect the GCP vs source comparison and are opt-in to avoid noise during initial onboarding.
+
+### `--check-misplaced-ddl`
+
+Fires a `misplaced_ddl` finding (severity: medium) when a SQL file contains a `CREATE TABLE` or `CREATE VIEW` statement for an object whose name does not match the file's stem.
+
+**Convention:** each file should define exactly the object its name implies.
+
+- `my_view.sql` defining `CREATE VIEW my_view` → OK
+- `my_view_v2.sql` defining `CREATE VIEW my_view` → OK (recognized version suffix — base `my_view.sql` exists as a sibling)
+- `project_setup.sql` defining `CREATE TABLE other_table` → `misplaced_ddl` finding
+
+### `--check-ddl-in-dml-folder`
+
+Fires a `ddl_in_dml_folder` finding (severity: medium) when a SQL file stored under a `dml/` folder contains DDL (`CREATE TABLE`, `CREATE VIEW`, or `ALTER TABLE`).
+
+**Convention:** the BQ source tree uses two sibling folder levels:
+- `bq/<dataset>/ddl/` — DDL (CREATE TABLE/VIEW, ALTER TABLE)
+- `bq/<dataset>/dml/` — DML (INSERT, UPDATE, DELETE, MERGE)
+
+### Example with both checks enabled
+
+```bash
+python generate_code_environment_drift_report.py \
+  --project-name my_product \
+  --repo-path /workspace/repos/... \
+  --check-misplaced-ddl \
+  --check-ddl-in-dml-folder \
+  ...
+```
 
 ---
 
