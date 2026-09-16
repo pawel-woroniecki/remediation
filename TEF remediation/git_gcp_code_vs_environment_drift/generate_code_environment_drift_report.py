@@ -655,10 +655,17 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             # don't have their column definitions merged into a single wrong entry.
             inventory_key = object_name
             if dataset:
-                _existing = inventory.get(object_name)
-                if _existing is not None and _existing.dataset and _existing.dataset != dataset:
-                    inventory[f"{_existing.dataset}.{object_name}"] = inventory.pop(object_name)
-                    inventory_key = f"{dataset}.{object_name}"
+                _qualified_key = f"{dataset}.{object_name}"
+                if _qualified_key in inventory:
+                    # A prior collision already promoted this dataset's base entry to a
+                    # qualified key; join that entry rather than creating a new unqualified
+                    # sibling (which would split the base from its versioned successors).
+                    inventory_key = _qualified_key
+                else:
+                    _existing = inventory.get(object_name)
+                    if _existing is not None and _existing.dataset and _existing.dataset != dataset:
+                        inventory[f"{_existing.dataset}.{object_name}"] = inventory.pop(object_name)
+                        inventory_key = _qualified_key
             entry = inventory.setdefault(
                 inventory_key,
                 SourceBqObject(object_name=object_name, dataset=dataset, object_type=object_type),
@@ -722,10 +729,14 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             # Same cross-dataset collision guard as for CREATE targets.
             _alter_key = obj
             if ds:
-                _existing = inventory.get(obj)
-                if _existing is not None and _existing.dataset and _existing.dataset != ds:
-                    inventory[f"{_existing.dataset}.{obj}"] = inventory.pop(obj)
-                    _alter_key = f"{ds}.{obj}"
+                _qualified_key = f"{ds}.{obj}"
+                if _qualified_key in inventory:
+                    _alter_key = _qualified_key
+                else:
+                    _existing = inventory.get(obj)
+                    if _existing is not None and _existing.dataset and _existing.dataset != ds:
+                        inventory[f"{_existing.dataset}.{obj}"] = inventory.pop(obj)
+                        _alter_key = _qualified_key
             entry = inventory.setdefault(
                 _alter_key,
                 SourceBqObject(object_name=obj, dataset=ds, object_type="table"),
