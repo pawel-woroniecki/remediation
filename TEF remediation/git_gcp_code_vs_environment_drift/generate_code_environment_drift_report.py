@@ -702,7 +702,20 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
             # are processed, so the old entry is replaced by the new name.
             rename_match = _RENAME_TO_RE.search(sql)
             if rename_match:
-                table_renames.append((alter_match.group("object"), rename_match.group("new_name")))
+                old_name = alter_match.group("object")
+                new_name = rename_match.group("new_name")
+                table_renames.append((old_name, new_name))
+                # Apply the rename immediately so that a later CREATE TABLE for the
+                # old name (e.g. v5 re-creates the table after v4 renamed it away)
+                # starts a fresh inventory entry rather than merging into and
+                # overwriting the pre-rename column set.
+                # The post-processing rename loop handles the case where old_name is
+                # already gone (it checks `if old_name in inventory`), so eager
+                # application here is safe even if the loop runs again afterwards.
+                if old_name in inventory:
+                    _renamed_entry = inventory.pop(old_name)
+                    _renamed_entry.object_name = new_name
+                    inventory[new_name] = _renamed_entry
                 continue
             ds = alter_match.group("dataset")
             obj = alter_match.group("object")
