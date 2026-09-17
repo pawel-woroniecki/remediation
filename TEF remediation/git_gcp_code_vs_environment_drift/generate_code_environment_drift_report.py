@@ -1320,7 +1320,12 @@ def compare_bigquery(
             source = source_bq[_sk]
             # Qualified source key: look up the exact dataset in actual_bq directly.
             if "." in _sk:
-                actual = actual_bq.get(_sk) or actual_bq_by_name[object_name][0]
+                actual = actual_bq.get(_sk)
+                if actual is None:
+                    # This source entry belongs to a dataset not in the current BQ scan scope.
+                    # Do not fall back to another dataset's entry — that would compare the wrong
+                    # schema and produce false positives (e.g. il_ source vs pl_ production).
+                    continue
             elif source.dataset:
                 actual = actual_bq.get(f"{source.dataset}.{object_name}") or actual_bq_by_name[object_name][0]
             else:
@@ -1567,10 +1572,15 @@ def write_markdown(
         object_name = finding.get("object_name")
         technology = finding.get("source_technology")
 
-        if technology == "bq" and object_name in source_bq:
-            files = source_bq[object_name].files
-            if files:
-                return ", ".join(files)
+        if technology == "bq":
+            # After cross-dataset collision promotion the entry may live under a qualified key.
+            entry = source_bq.get(object_name)
+            if entry is None:
+                dataset = finding.get("dataset")
+                if dataset:
+                    entry = source_bq.get(f"{dataset}.{object_name}")
+            if entry and entry.files:
+                return ", ".join(entry.files)
 
         if technology == "dbt_model" and object_name in source_dbt:
             relative_path = source_dbt[object_name].get("relative_path")
