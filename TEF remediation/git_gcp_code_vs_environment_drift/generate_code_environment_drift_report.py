@@ -577,7 +577,14 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
         alter_match = _ALTER_TABLE_RE.search(sql)
 
         # Skip pure DML / MERGE / script files — no DDL of any kind.
+        # Exception: a file with only DROP TABLE permanently removes the object from
+        # inventory (e.g. cell_slice_resource_v1.sql intentionally retiring a table).
         if not targets and not alter_match:
+            for _drop_m in _DROP_TABLE_RE.finditer(sql):
+                _drop_obj = _drop_m.group("obj")
+                inventory.pop(_drop_obj, None)
+                for _key in [k for k in inventory if k.endswith(f".{_drop_obj}")]:
+                    inventory.pop(_key, None)
             continue
 
         # Compute the object name this file is expected to define.
@@ -759,19 +766,6 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
                 entry.dataset = ds
             if entry.object_type in ("unknown", "alter_table"):
                 entry.object_type = "table"
-
-        # A file that contains only DROP TABLE (no CREATE, no ALTER TABLE) permanently
-        # removes the object from the source inventory.  This handles migration scripts
-        # such as "v1.sql: DROP TABLE IF EXISTS foo" that intentionally retire a table.
-        # Transient in-file drops (CREATE + DROP in one file) are already handled inside
-        # extract_create_targets; this branch covers the cross-file case only.
-        if not targets and not alter_match:
-            for _drop_m in _DROP_TABLE_RE.finditer(sql):
-                _drop_obj = _drop_m.group("obj")
-                inventory.pop(_drop_obj, None)
-                # Also remove any cross-dataset-promoted key (e.g. "dataset.table").
-                for _key in [k for k in inventory if k.endswith(f".{_drop_obj}")]:
-                    inventory.pop(_key, None)
 
     # Apply TABLE-level renames from ALTER TABLE ... RENAME TO statements.
     # Runs before column-operation transforms so any pending ALTER COLUMN changes
