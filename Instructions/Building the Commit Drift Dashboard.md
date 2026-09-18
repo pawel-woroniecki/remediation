@@ -89,7 +89,34 @@ dates of those commits, for the most recent successful run.
 
 ---
 
-## Step 4 — Add a bar chart: top repos by commit drift
+## Step 4 — Add the pivot table (drift directions as columns)
+
+This is the primary at-a-glance view: one row per repo, one column per drift direction,
+cells showing `unique_commits`. The three critical directions are automatically labelled
+with ⚠ by the BQ view.
+
+1. **Insert → Pivot table**.
+2. In the **Setup** panel, set:
+   - **Row dimension:** `repo`
+   - **Column dimension:** `drift_direction`
+   - **Metric:** `unique_commits` (SUM)
+3. **Sort** (rows): `unique_commits` descending — most-drifted repos appear first.
+4. **Style → Column total**: Off (totals are not meaningful across directions).
+5. **Style → Heatmap**: On — colour-codes cells by value so high counts stand out.
+
+> **Column order:** Looker Studio sorts pivot columns alphabetically by the dimension value.
+> The ⚠ character (Unicode U+26A0) sorts before ASCII letters in BigQuery's collation, so
+> the three critical columns appear on the left automatically:
+> `⚠ production not in master` · `⚠ production not in test` · `⚠ test not in master`
+> followed by `master not in test` · `test not in production`.
+> You can drag column headers to reorder them if needed.
+
+> The flat table from Step 3 remains useful for drill-down (it shows authors and commit
+> dates per row). The pivot gives the cross-direction summary at a glance.
+
+---
+
+## Step 5 — Add a bar chart: top repos by commit drift
 
 1. **Insert → Bar chart**.
 2. Setup:
@@ -101,9 +128,9 @@ dates of those commits, for the most recent successful run.
 
 ---
 
-## Step 5 — Add filter controls
+## Step 6 — Add filter controls
 
-Insert these four controls above the table and bar chart:
+Insert these five controls above the table and pivot table:
 
 ### Filter 1 — Run date
 
@@ -157,7 +184,7 @@ Insert these four controls above the table and bar chart:
 
 ---
 
-## Step 6 — Optional: add summary scorecards
+## Step 7 — Optional: add summary scorecards
 
 Three scorecard tiles at the top give a single-number total for the selected filters.
 
@@ -168,7 +195,7 @@ Three scorecard tiles at the top give a single-number total for the selected fil
 
 ---
 
-## Step 7 — Add the commit staleness table
+## Step 8 — Add the commit staleness table
 
 This table answers the question *"how old are these waiting commits?"* — surfacing
 drift directions where unmerged commits have been sitting for weeks or months.
@@ -252,7 +279,7 @@ over a week old in amber; recent commits are unformatted.
 
 ---
 
-## Step 8 — Share
+## Step 9 — Share
 
 1. Click **Share** (top right).
 2. Add the team or Google Group.
@@ -289,7 +316,7 @@ need attention. The bar chart on the right mirrors the sort order visually.
 | `environment` | Dimension | GCP environment label |
 | `triggered_by` | Dimension | Email or identity that triggered the run |
 | `repo` | Dimension | GitLab project name |
-| `drift_direction` | Dimension | Human-readable label: `<right_branch> not in <left_branch>` |
+| `drift_direction` | Dimension | Direction label: `<right_branch> not in <left_branch>`. The three critical directions are prefixed with ⚠: `⚠ test not in master`, `⚠ production not in test`, `⚠ production not in master`. |
 | `left_branch` | Dimension | The base branch (reference point) |
 | `right_branch` | Dimension | The comparison branch (source of unique commits) |
 | `comparison_mode` | Dimension | How the comparison was performed |

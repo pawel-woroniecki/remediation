@@ -47,11 +47,16 @@ kpi_summary AS (
     k.repo,
     k.left_branch,
     k.right_branch,
-    CONCAT(
-      REGEXP_EXTRACT(k.right_branch, r'origin/(.+)'),
-      ' not in ',
-      REGEXP_EXTRACT(k.left_branch,  r'origin/(.+)')
-    )                            AS drift_direction,
+    CASE CONCAT(REGEXP_EXTRACT(k.right_branch, r'origin/(.+)'),
+                ' not in ',
+                REGEXP_EXTRACT(k.left_branch,  r'origin/(.+)'))
+      WHEN 'test not in master'       THEN '⚠ test not in master'
+      WHEN 'production not in test'   THEN '⚠ production not in test'
+      WHEN 'production not in master' THEN '⚠ production not in master'
+      ELSE CONCAT(REGEXP_EXTRACT(k.right_branch, r'origin/(.+)'),
+                  ' not in ',
+                  REGEXP_EXTRACT(k.left_branch,  r'origin/(.+)'))
+    END                          AS drift_direction,
     k.unique_commits,
     k.unique_files,
     k.severity,
