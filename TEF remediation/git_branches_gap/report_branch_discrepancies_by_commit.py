@@ -147,7 +147,8 @@ def get_detail_rows(
             "problem_statement": problem_statement,
         })
 
-    return rows, len(file_set), len(commit_set)
+    commits_with_files = {r["commit"] for r in rows}
+    return rows, len(file_set), len(commits_with_files)
 
 
 def commit_severity(unique_commits: int) -> str:
