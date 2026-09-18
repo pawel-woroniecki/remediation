@@ -30,8 +30,9 @@ for the run date selected by the user.
 
 - At least one `devops-reports-file-drift` Cloud Run Job execution has completed
   successfully (so the `branch_drift_kpis` and `branch_drift_evidence` tables have data).
+- `terraform apply` has been run and the `file_drift_report` view exists in `devops_reports`
+  (verify: `SELECT * FROM tefde-gcp-fastoss-dev.devops_reports.file_drift_report LIMIT 1`).
 - A `telefonica.de` Google account with read access to `tefde-gcp-fastoss-dev`.
-- The SQL file `TEF remediation/looker_sql/file_drift_report.sql` is available to copy from.
 
 ---
 
@@ -39,21 +40,18 @@ for the run date selected by the user.
 
 1. Go to [lookerstudio.google.com](https://lookerstudio.google.com) and sign in.
 2. Click **Create → Report**.
-3. In the data source picker choose **BigQuery → Custom Query**.
-4. Set the billing project to `tefde-gcp-fastoss-dev`.
-5. Paste the **main query** from `TEF remediation/looker_sql/file_drift_report.sql` into
-   the query box. Use only the first query block — stop before the `/* ---- */` comment
-   separator that precedes the commented-out drill-through query.
-6. **Leave "Enable date range parameters" unchecked.** The query uses a fixed 90-day
+3. In the data source picker choose **BigQuery → My Projects**.
+4. Select **`tefde-gcp-fastoss-dev` → `devops_reports` → `file_drift_report`**.
+5. **Leave "Enable date range parameters" unchecked.** The view uses a fixed 90-day
    lookback window and does not use `@DS_START_DATE`/`@DS_END_DATE` parameters. Checking
    this box would cause an error.
-7. Name the data source `File Drift`.
-8. Click **Add** (top right) → **Add to Report**.
+6. Name the data source `File Drift`.
+7. Click **Add** (top right) → **Add to Report**.
 
-> **Which query to paste:** The file contains two query blocks. The active one starts with
-> `WITH latest_exec AS (` and ends with `ORDER BY ks.severity_sort, ks.unique_files DESC, ...`.
-> Everything after the first `/* ---- */` divider is the commented-out drill-through query —
-> do not include it.
+> The `file_drift_report` view is defined in `TEF remediation/Terraform/BQ DS + Tables.tf`
+> and includes a `run_number` field (1 = latest run for that date, 2 = previous run, …).
+> The SQL file `TEF remediation/looker_sql/file_drift_report.sql` is kept as reference only —
+> it does not include `run_number` and is no longer the primary data source.
 
 ---
 
@@ -65,6 +63,7 @@ for the run date selected by the user.
    | Field | Change to |
    |---|---|
    | `run_date` | **Date** (day-level) — used by the Run date dropdown filter |
+   | `run_number` | **Number**, Aggregation: **None** — used by the Run number dropdown filter |
    | `execution_ts` | **Date & Time** |
    | `unique_files` | **Number**, Aggregation: **Sum** |
    | `files_added` | **Number**, Aggregation: **Sum** |
@@ -122,26 +121,36 @@ Insert these controls above the table and bar chart:
 4. Leaving the filter empty shows all runs combined.
 
 > **"Enable date range parameters" must be UNCHECKED** on the `File Drift` data source.
-> The SQL uses a fixed 90-day lookback window — it does not use Looker Studio date
+> The view uses a fixed 90-day lookback window — it does not use Looker Studio date
 > parameters.
 
-### Filter 2 — Repository
+### Filter 2 — Run number
+
+1. **Insert → Filter control**.
+2. Field: `run_number`. Control type: **Drop-down list**. Label: `Run (1 = latest)`.
+3. When the job runs more than once in a day (e.g. a scheduled run at 05:30 and a manual
+   re-run after a bug fix), `run_number = 1` is the most recent run for the selected date
+   and `run_number = 2` is the previous one.
+4. Use together with the `run_date` filter to compare pre-fix and post-fix runs on the same
+   day. Leaving this filter empty shows all runs for the selected date combined.
+
+### Filter 3 — Repository
 
 1. **Insert → Filter control**.
 2. Field: `repo`. Control type: **Drop-down list**. Label: `Repository`.
 
-### Filter 3 — Severity
+### Filter 4 — Severity
 
 1. **Insert → Filter control**.
 2. Field: `severity`. Control type: **Drop-down list**. Label: `Severity`.
 3. Use this to show only `high` or `medium` severity rows.
 
-### Filter 4 — Drift direction
+### Filter 5 — Drift direction
 
 1. **Insert → Filter control**.
 2. Field: `drift_direction`. Control type: **Drop-down list**. Label: `Direction`.
 
-> To make all four controls apply to every chart: select each control → right panel →
+> To make all five controls apply to every chart: select each control → right panel →
 > **Filter** section → confirm **All charts on this page** is selected.
 
 ---
@@ -198,6 +207,7 @@ For organisation-wide access where viewers do not need their own GCP permissions
 | Field | Type | Description |
 |---|---|---|
 | `run_date` | Date | Calendar date of the run (Europe/Berlin) — use as the Run date dropdown filter field |
+| `run_number` | Number | 1 = latest run for that date, 2 = previous run — use as the Run number dropdown filter field |
 | `execution_ts` | Date & Time | Full run start timestamp |
 | `environment` | Dimension | GCP environment label |
 | `triggered_by` | Dimension | Email or identity that triggered the run |
@@ -226,6 +236,6 @@ For organisation-wide access where viewers do not need their own GCP permissions
 - `Instructions/Building the Env Drift Summary Dashboard.md` — BigQuery/GCS schema drift
 - `Instructions/Building the Looker Studio Dashboards.md` — full 4-page dashboard guide
 - `Instructions/Building the Management Dashboard.md` — executive red/green health grid
-- `TEF remediation/looker_sql/file_drift_report.sql` — the SQL query used as data source
-- `TEF remediation/Terraform/BQ DS + Tables.tf` — `branch_drift_kpis` and
-  `branch_drift_evidence` schema definitions
+- `TEF remediation/looker_sql/file_drift_report.sql` — reference SQL (no `run_number`; not used as data source)
+- `TEF remediation/Terraform/BQ DS + Tables.tf` — `file_drift_report` view definition,
+  `branch_drift_kpis` and `branch_drift_evidence` schema definitions
