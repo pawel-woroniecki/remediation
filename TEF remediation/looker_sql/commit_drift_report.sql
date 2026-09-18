@@ -1,3 +1,5 @@
+-- BQ view: devops_reports.commit_drift_report  (Terraform/BQ DS + Tables.tf)
+-- Prefer the view as the Looker Studio data source; this file is kept as reference.
 /*
  * Commit-Based Branch Drift Report
  *
@@ -6,9 +8,8 @@
  * Tables  : devops_reports.executions
  *           devops_reports.branch_drift_kpis
  *           devops_reports.branch_drift_evidence
- * Usage   : Replace tefde-gcp-fastoss-dev with your GCP project ID.
- *           In Looker, register as a native derived table or run via SQL Runner.
- *           In Looker Studio, use as a Custom Query data source.
+ * Usage   : Connect Looker Studio directly to the commit_drift_report BQ view.
+ *           This SQL is kept as reference; it does NOT include run_number.
  *
  * Suggested dashboard tiles:
  *   - Severity heat-map  : repo × drift direction, colour = severity

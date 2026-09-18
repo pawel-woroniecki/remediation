@@ -703,3 +703,240 @@ resource "google_bigquery_table" "orphan_dataset_objects" {
   ])
 }
 
+# ---------------------------------------------------------------------------
+# Looker Studio view — commit drift detail report
+# ---------------------------------------------------------------------------
+# One row per repo × drift direction × run (last 90 days).
+# run_number: 1 = latest run for run_date, 2 = previous, etc.
+# In Looker Studio connect to this view directly; add Filter Controls on
+# run_date (date picker) and run_number (dropdown) to select a specific run.
+resource "google_bigquery_table" "commit_drift_report" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "commit_drift_report"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      WITH latest_exec AS (
+        SELECT
+          execution_id,
+          execution_ts,
+          DATE(execution_ts, 'Europe/Berlin')             AS run_date,
+          ROW_NUMBER() OVER (
+            PARTITION BY DATE(execution_ts, 'Europe/Berlin')
+            ORDER BY execution_ts DESC
+          )                                               AS run_number,
+          environment,
+          status,
+          triggered_by
+        FROM `${var.reporting_project_id}.devops_reports.executions`
+        WHERE report_type = 'commit_drift'
+          AND status      = 'success'
+          AND execution_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
+      ),
+
+      kpi_summary AS (
+        SELECT
+          e.execution_id,
+          e.run_date,
+          e.run_number,
+          e.execution_ts,
+          e.environment,
+          e.triggered_by,
+          k.repo,
+          k.left_branch,
+          k.right_branch,
+          CONCAT(
+            REGEXP_EXTRACT(k.right_branch, r'origin/(.+)'),
+            ' not in ',
+            REGEXP_EXTRACT(k.left_branch,  r'origin/(.+)')
+          )                            AS drift_direction,
+          k.unique_commits,
+          k.unique_files,
+          k.severity,
+          k.status                     AS branch_status,
+          k.comparison_mode,
+          CASE k.severity
+            WHEN 'high'   THEN 1
+            WHEN 'medium' THEN 2
+            WHEN 'low'    THEN 3
+            WHEN 'none'   THEN 4
+            ELSE               5
+          END                          AS severity_sort
+        FROM `${var.reporting_project_id}.devops_reports.branch_drift_kpis` k
+        JOIN latest_exec e USING (execution_id)
+        WHERE k.drift_type = 'commit'
+          AND k.status     = 'ok'
+      ),
+
+      evidence_agg AS (
+        SELECT
+          ev.execution_id,
+          ev.repo,
+          ev.discrepancy,
+          COUNT(DISTINCT ev.commit_sha) AS distinct_commits,
+          COUNT(DISTINCT ev.author)     AS distinct_authors,
+          COUNT(DISTINCT ev.file_path)  AS distinct_files,
+          MIN(ev.commit_date)           AS earliest_commit_date,
+          MAX(ev.commit_date)           AS latest_commit_date
+        FROM `${var.reporting_project_id}.devops_reports.branch_drift_evidence` ev
+        JOIN latest_exec USING (execution_id)
+        WHERE ev.drift_type = 'commit'
+        GROUP BY ev.execution_id, ev.repo, ev.discrepancy
+      )
+
+      SELECT
+        ks.run_date,
+        ks.run_number,
+        ks.execution_ts,
+        ks.environment,
+        ks.triggered_by,
+        ks.repo,
+        ks.drift_direction,
+        ks.left_branch,
+        ks.right_branch,
+        ks.unique_commits,
+        ks.unique_files,
+        ks.severity,
+        ks.branch_status,
+        ks.comparison_mode,
+        ea.distinct_authors,
+        ea.earliest_commit_date,
+        ea.latest_commit_date
+      FROM kpi_summary ks
+      LEFT JOIN evidence_agg ea
+        ON  ea.execution_id  = ks.execution_id
+        AND ea.repo          = ks.repo
+        AND ea.discrepancy   = CONCAT(
+              REGEXP_EXTRACT(ks.right_branch, r'origin/(.+)'), '_not_in_',
+              REGEXP_EXTRACT(ks.left_branch,  r'origin/(.+)')
+            )
+      ORDER BY ks.severity_sort, ks.unique_commits DESC, ks.repo, ks.left_branch
+    EOT
+    use_legacy_sql = false
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Looker Studio view — file drift detail report
+# ---------------------------------------------------------------------------
+# One row per repo × drift direction × run (last 90 days).
+# run_number: 1 = latest run for run_date, 2 = previous, etc.
+# In Looker Studio connect to this view directly; add Filter Controls on
+# run_date (date picker) and run_number (dropdown) to select a specific run.
+resource "google_bigquery_table" "file_drift_report" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "file_drift_report"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      WITH latest_exec AS (
+        SELECT
+          execution_id,
+          execution_ts,
+          DATE(execution_ts, 'Europe/Berlin')             AS run_date,
+          ROW_NUMBER() OVER (
+            PARTITION BY DATE(execution_ts, 'Europe/Berlin')
+            ORDER BY execution_ts DESC
+          )                                               AS run_number,
+          environment,
+          status,
+          triggered_by
+        FROM `${var.reporting_project_id}.devops_reports.executions`
+        WHERE report_type = 'file_drift'
+          AND status      = 'success'
+          AND execution_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
+      ),
+
+      kpi_summary AS (
+        SELECT
+          e.execution_id,
+          e.run_date,
+          e.run_number,
+          e.execution_ts,
+          e.environment,
+          e.triggered_by,
+          k.repo,
+          k.left_branch,
+          k.right_branch,
+          CONCAT(
+            REGEXP_EXTRACT(k.right_branch, r'origin/(.+)'),
+            ' differs from ',
+            REGEXP_EXTRACT(k.left_branch,  r'origin/(.+)')
+          )                            AS drift_direction,
+          k.unique_commits,
+          k.unique_files,
+          k.severity,
+          k.status                     AS branch_status,
+          k.comparison_mode,
+          CASE k.severity
+            WHEN 'high'   THEN 1
+            WHEN 'medium' THEN 2
+            WHEN 'low'    THEN 3
+            WHEN 'none'   THEN 4
+            ELSE               5
+          END                          AS severity_sort
+        FROM `${var.reporting_project_id}.devops_reports.branch_drift_kpis` k
+        JOIN latest_exec e USING (execution_id)
+        WHERE k.drift_type = 'content'
+          AND k.status     = 'ok'
+      ),
+
+      evidence_agg AS (
+        SELECT
+          ev.execution_id,
+          ev.repo,
+          ev.discrepancy,
+          COUNT(DISTINCT ev.file_path)                                         AS distinct_files,
+          COUNTIF(UPPER(ev.change_type) = 'A')                                AS files_added,
+          COUNTIF(UPPER(ev.change_type) = 'M')                                AS files_modified,
+          COUNTIF(UPPER(ev.change_type) = 'D')                                AS files_deleted,
+          COUNTIF(ev.change_type NOT IN ('A','M','D') OR ev.change_type IS NULL) AS files_other,
+          COUNT(DISTINCT ev.author)                                            AS distinct_authors,
+          MIN(ev.commit_date)                                                  AS earliest_change_date,
+          MAX(ev.commit_date)                                                  AS latest_change_date
+        FROM `${var.reporting_project_id}.devops_reports.branch_drift_evidence` ev
+        JOIN latest_exec USING (execution_id)
+        WHERE ev.drift_type = 'content'
+        GROUP BY ev.execution_id, ev.repo, ev.discrepancy
+      )
+
+      SELECT
+        ks.run_date,
+        ks.run_number,
+        ks.execution_ts,
+        ks.environment,
+        ks.triggered_by,
+        ks.repo,
+        ks.drift_direction,
+        ks.left_branch,
+        ks.right_branch,
+        ks.comparison_mode,
+        ks.unique_commits,
+        ks.unique_files,
+        ks.severity,
+        ks.branch_status,
+        ea.distinct_authors,
+        ea.files_added,
+        ea.files_modified,
+        ea.files_deleted,
+        ea.files_other,
+        ea.earliest_change_date,
+        ea.latest_change_date
+      FROM kpi_summary ks
+      LEFT JOIN evidence_agg ea
+        ON  ea.execution_id = ks.execution_id
+        AND ea.repo         = ks.repo
+        AND ea.discrepancy  = CONCAT(
+              REGEXP_EXTRACT(ks.right_branch, r'origin/(.+)'), '_not_in_',
+              REGEXP_EXTRACT(ks.left_branch,  r'origin/(.+)')
+            )
+      ORDER BY ks.severity_sort, ks.unique_files DESC, ks.repo, ks.left_branch
+    EOT
+    use_legacy_sql = false
+  }
+}
+

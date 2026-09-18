@@ -183,8 +183,16 @@ No service account key is required. Looker Studio uses the dashboard creator's o
 
 1. Looker Studio → Create → Data Source → BigQuery
 2. Select project `tefde-gcp-fastoss-dev` → dataset `devops_reports`
-3. Choose a table (e.g. `execution_daily_summary`) or write a custom query using the SQL in `looker_sql/`
+3. Choose the table or view for the dashboard (see the BigQuery Reporting Model table below for recommendations per report type)
 4. Share the dashboard (access is controlled in Looker Studio, not GCP IAM)
+
+**Commit drift and file drift dashboards** — connect directly to the `commit_drift_report` and `file_drift_report` views (no Custom Query needed). Both views include a `run_number` field (1 = latest run for that date, 2 = previous run, …). Add two Filter Controls to the dashboard:
+- `run_date` — date picker to select the day
+- `run_number` — drop-down to select the specific run within that day
+
+> "Enable date range parameters" must be **UNCHECKED** on these data sources.
+
+The `looker_sql/` SQL files remain as reference but are no longer the primary data source for these two dashboards.
 
 ### 7. Run a report manually
 
@@ -230,6 +238,8 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`, located in
 | `entities` | Reference catalogue |
 | `execution_daily_summary` *(view)* | Daily success/failure rates per report type — connect directly to Looker Studio |
 | `env_drift_summary` *(view)* | Per-repository env-drift summary: `bq_findings`, `gcs_findings`, `run_number`, and `report_url` (authenticated GCS link to the report file). Use as a Looker Studio data source for the env-drift dashboard. |
+| `commit_drift_report` *(view)* | Per-repo × drift-direction commit drift detail with `run_number` (1 = latest run for that date, 2 = previous, …). Use as Looker Studio data source for the commit drift dashboard; add Filter Controls on `run_date` and `run_number`. |
+| `file_drift_report` *(view)* | Per-repo × drift-direction file drift detail with `run_number`. Same Filter Control setup as `commit_drift_report`. Includes `files_added`, `files_modified`, `files_deleted`, `files_other`. |
 | `management_dashboard` *(view)* | Management red/green health grid: joins env drift, commit drift, and file drift per repo × date into a single row with a `status` column (`All clear` / `Has findings`). Use as a Looker Studio data source for the executive summary dashboard. |
 
 ---
