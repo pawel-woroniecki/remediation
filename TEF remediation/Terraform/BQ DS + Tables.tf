@@ -856,7 +856,17 @@ resource "google_bigquery_table" "commit_drift_evidence_report" {
         SELECT
           execution_id,
           repo,
-          discrepancy,
+          CONCAT(
+            CASE REGEXP_EXTRACT(right_branch, r'origin/(.+)')
+              WHEN 'production' THEN 'prod'
+              ELSE REGEXP_EXTRACT(right_branch, r'origin/(.+)')
+            END,
+            '_not_in_',
+            CASE REGEXP_EXTRACT(left_branch, r'origin/(.+)')
+              WHEN 'production' THEN 'prod'
+              ELSE REGEXP_EXTRACT(left_branch, r'origin/(.+)')
+            END
+          )                                 AS discrepancy,
           CASE CONCAT(REGEXP_EXTRACT(right_branch, r'origin/(.+)'),
                       ' not in ',
                       REGEXP_EXTRACT(left_branch,  r'origin/(.+)'))
