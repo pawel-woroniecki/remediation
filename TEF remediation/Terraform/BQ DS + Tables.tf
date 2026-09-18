@@ -824,6 +824,77 @@ resource "google_bigquery_table" "commit_drift_report" {
 }
 
 # ---------------------------------------------------------------------------
+# Looker Studio view — commit drift evidence (drill-through)
+# ---------------------------------------------------------------------------
+# One row per file per commit (evidence level). Joins branch_drift_evidence to
+# branch_drift_kpis to recover human-readable drift_direction (including ⚠ prefix
+# for the 3 critical directions). Use as a second data source in the Commit Drift
+# dashboard for the drill-through table showing repo, direction, SHA, author, date, file.
+resource "google_bigquery_table" "commit_drift_evidence_report" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "commit_drift_evidence_report"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      WITH exec AS (
+        SELECT
+          execution_id,
+          execution_ts,
+          DATE(execution_ts, 'Europe/Berlin')             AS run_date,
+          ROW_NUMBER() OVER (
+            PARTITION BY DATE(execution_ts, 'Europe/Berlin')
+            ORDER BY execution_ts DESC
+          )                                               AS run_number
+        FROM `${var.reporting_project_id}.devops_reports.executions`
+        WHERE report_type = 'commit_drift'
+          AND status      = 'success'
+          AND execution_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
+      ),
+      kpi AS (
+        SELECT
+          execution_id,
+          repo,
+          discrepancy,
+          CASE CONCAT(REGEXP_EXTRACT(right_branch, r'origin/(.+)'),
+                      ' not in ',
+                      REGEXP_EXTRACT(left_branch,  r'origin/(.+)'))
+            WHEN 'test not in master'       THEN '⚠ test not in master'
+            WHEN 'production not in test'   THEN '⚠ production not in test'
+            WHEN 'production not in master' THEN '⚠ production not in master'
+            ELSE CONCAT(REGEXP_EXTRACT(right_branch, r'origin/(.+)'),
+                        ' not in ',
+                        REGEXP_EXTRACT(left_branch,  r'origin/(.+)'))
+          END                               AS drift_direction
+        FROM `${var.reporting_project_id}.devops_reports.branch_drift_kpis`
+        WHERE drift_type = 'commit'
+          AND status     = 'ok'
+      )
+      SELECT
+        ex.run_date,
+        ex.run_number,
+        ex.execution_ts,
+        ev.repo,
+        k.drift_direction,
+        ev.commit_sha,
+        ev.author,
+        ev.commit_date,
+        ev.file_path,
+        ev.problem_statement
+      FROM `${var.reporting_project_id}.devops_reports.branch_drift_evidence` ev
+      JOIN exec ex USING (execution_id)
+      JOIN kpi  k  ON  k.execution_id = ev.execution_id
+                   AND k.repo         = ev.repo
+                   AND k.discrepancy  = ev.discrepancy
+      WHERE ev.drift_type = 'commit'
+      ORDER BY ex.run_date DESC, ex.run_number, ev.repo, k.drift_direction, ev.commit_date
+    EOT
+    use_legacy_sql = false
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Looker Studio view — file drift detail report
 # ---------------------------------------------------------------------------
 # One row per repo × drift direction × run (last 90 days).

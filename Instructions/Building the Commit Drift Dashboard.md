@@ -279,7 +279,76 @@ over a week old in amber; recent commits are unformatted.
 
 ---
 
-## Step 9 — Share
+## Step 9 — Add the commit evidence table (drill-through)
+
+This step adds a second data source and table showing individual commits and files — the
+detail behind the pivot table counts.
+
+### Prerequisites
+
+`terraform apply` has been run and the `commit_drift_evidence_report` view exists in
+`devops_reports` (verify: `SELECT * FROM tefde-gcp-fastoss-dev.devops_reports.commit_drift_evidence_report LIMIT 1`).
+
+### Connect the data source
+
+1. In Looker Studio edit mode, click **Add data** (top toolbar).
+2. Choose **BigQuery → My Projects → `tefde-gcp-fastoss-dev` → `devops_reports` →
+   `commit_drift_evidence_report`**.
+3. Click **Add** → **Add to Report**.
+4. Name the data source `Commit Evidence`.
+
+> **"Enable date range parameters"** must be **unchecked**.
+
+### Set field types
+
+| Field | Type |
+|---|---|
+| `run_date` | Date |
+| `run_number` | Number, Aggregation: None |
+| `execution_ts` | Date & Time |
+| `commit_date` | Date & Time |
+| `commit_sha` | Text |
+| `author` | Text |
+| `repo` | Text |
+| `drift_direction` | Text |
+| `file_path` | Text |
+
+### Build the evidence table
+
+1. **Insert → Table** (use this data source: `Commit Evidence`).
+2. Set all columns as **Dimensions**:
+   - `repo`, `drift_direction`, `commit_sha`, `author`, `commit_date`, `file_path`
+3. **Sort:** `commit_date` descending.
+4. **Rows per page:** 50.
+5. **Do NOT set a Date range dimension** — the `run_date` filter control handles date selection.
+
+### Add filter controls for the evidence table
+
+Add these four Filter Controls. Make sure each one applies to **this table only** (set
+**Specific charts** instead of **All charts on this page** — otherwise the `run_date`
+control from the main table will conflict with this data source's `run_date`):
+
+1. Field: `run_date`. Label: `Evidence: Run date`.
+2. Field: `run_number`. Label: `Evidence: Run (1 = latest)`.
+3. Field: `repo`. Label: `Evidence: Repository`.
+4. Field: `drift_direction`. Label: `Evidence: Direction`.
+
+### Finding a commit in GitLab
+
+The `commit_sha` column contains the full 40-character SHA. To view the diff:
+
+```
+https://<your-gitlab-host>/<group>/<repo>/-/commit/<commit_sha>
+```
+
+For example, for `operations_fault_mgmt`:
+```
+https://<your-gitlab-host>/<group>/operations_fault_mgmt/-/commit/295587922c7c6ee7b9494d7028aff9034aa7f18f
+```
+
+---
+
+## Step 10 — Share
 
 1. Click **Share** (top right).
 2. Add the team or Google Group.

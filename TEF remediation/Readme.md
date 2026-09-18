@@ -239,6 +239,7 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`, located in
 | `execution_daily_summary` *(view)* | Daily success/failure rates per report type — connect directly to Looker Studio |
 | `env_drift_summary` *(view)* | Per-repository env-drift summary: `bq_findings`, `gcs_findings`, `run_number`, and `report_url` (authenticated GCS link to the report file). Use as a Looker Studio data source for the env-drift dashboard. |
 | `commit_drift_report` *(view)* | Per-repo × drift-direction commit drift detail with `run_number` (1 = latest run for that date, 2 = previous, …). Use as Looker Studio data source for the commit drift dashboard; add Filter Controls on `run_date` and `run_number`. |
+| `commit_drift_evidence_report` *(view)* | One row per file per commit — evidence level drill-through. Columns: `repo`, `drift_direction` (⚠ prefix on the 3 critical directions), `commit_sha`, `author`, `commit_date`, `file_path`. Use as a second data source on the commit drift dashboard for the evidence table. |
 | `file_drift_report` *(view)* | Per-repo × drift-direction file drift detail with `run_number`. Same Filter Control setup as `commit_drift_report`. Includes `files_added`, `files_modified`, `files_deleted`, `files_other`. |
 | `management_dashboard` *(view)* | Management red/green health grid: joins env drift, commit drift, and file drift per repo × date into a single row with a `status` column (`All clear` / `Has findings`). Use as a Looker Studio data source for the executive summary dashboard. |
 
