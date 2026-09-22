@@ -70,6 +70,18 @@ DEFAULT_SHORT_PATTERNS: list[str] = [
     r"(?<=_)prod(?![a-zA-Z_])",   # prod preceded by _  (e.g. status_prod)
 ]
 
+# Lifecycle block injected into every google_bigquery_dataset resource in
+# propagated files so that IAM access and storage_billing_model are never
+# overwritten — those settings differ per environment and are managed outside
+# of this Terraform code.
+DATASET_LIFECYCLE = """
+  lifecycle {
+    ignore_changes = [
+      storage_billing_model,
+      access,
+    ]
+  }"""
+
 # Source environment and its output folder name per target environment.
 TARGETS: dict[str, str] = {
     "dev-gke": "prod_dev-gke",
@@ -104,6 +116,22 @@ def replace_env(
     total += n
 
     return content, total
+
+
+def inject_dataset_lifecycle(content: str) -> str:
+    """Insert a lifecycle ignore_changes block into a google_bigquery_dataset resource.
+
+    Does nothing if the file is not a dataset resource or already has a lifecycle block.
+    Inserts before the top-level closing brace (column-0 '}') so nested blocks are safe.
+    """
+    if 'resource "google_bigquery_dataset"' not in content:
+        return content
+    if "lifecycle" in content:
+        return content  # already present — don't duplicate
+    pos = content.rfind("\n}")
+    if pos == -1:
+        return content
+    return content[:pos] + DATASET_LIFECYCLE + content[pos:]
 
 
 def propagate(
@@ -143,6 +171,7 @@ def propagate(
                 continue
 
             new_content, subs = replace_env(content, target_env, short_patterns)
+            new_content = inject_dataset_lifecycle(new_content)
 
             if dry_run:
                 status = f"{subs} substitution(s)" if subs else "no changes"
