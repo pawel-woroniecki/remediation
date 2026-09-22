@@ -388,3 +388,61 @@ python "TEF remediation/scripts/organize_tf_export_flat.py" \
 **Output**
 Prints a per-repo file count for each environment and a grand total.
 Re-running is safe — identical files (same size and modification time) are skipped.
+
+---
+
+### 7. `propagate_tf_env.py`
+
+**Purpose**
+Copies the `prod/` output from `organize_tf_export_flat.py` into two sibling
+folders — `prod_dev-gke/` and `prod_test/` — substituting the environment token
+`prod` throughout every file's content so the Terraform code targets the correct
+GCP project, bucket, and group names for each lower environment.
+
+**Replacement rule**
+
+`prod` is replaced only when it appears as a **standalone environment token**, not
+as part of a word like `production` or `product`:
+
+| Original | `prod_dev-gke/` | `prod_test/` |
+|---|---|---|
+| `tefde-gcp-fastoss-prod` | `tefde-gcp-fastoss-dev-gke` | `tefde-gcp-fastoss-test` |
+| `fastoss-prod-gcs-reports` | `fastoss-dev-gke-gcs-reports` | `fastoss-test-gcs-reports` |
+| `group-prod@domain.com` | `group-dev-gke@domain.com` | `group-test@domain.com` |
+| `"production"` | unchanged | unchanged |
+| `"product"` | unchanged | unchanged |
+
+> **Note:** If any file references the GKE project `tefde-gcp-fastoss-prod-gke`,
+> the substitution will produce `tefde-gcp-fastoss-dev-gke-gke` (wrong). Use
+> `--dry-run` to check before applying and fix those lines manually.
+
+**Prerequisites**
+- `organize_tf_export_flat.py` has already run and `terraform-export-flat/prod/`
+  exists and is populated.
+
+**Run**
+```bash
+cd ~/remediation
+
+# Preview substitutions first
+python "TEF remediation/scripts/propagate_tf_env.py" \
+  --flat-dir /home/nq10083194/terraform-export-flat \
+  --dry-run
+
+# Run for real
+python "TEF remediation/scripts/propagate_tf_env.py" \
+  --flat-dir /home/nq10083194/terraform-export-flat
+```
+
+**All options**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--flat-dir PATH` | `/home/nq10083194/terraform-export-flat` | Parent of the `prod/` source folder. |
+| `--dry-run` | off | Print planned writes and show up to 3 example substitutions per file without writing. |
+
+**Output**
+Creates `prod_dev-gke/` and `prod_test/` as siblings of `prod/`, each mirroring
+the full folder structure of `prod/` with environment tokens substituted.
+Prints a per-target file count and total substitution count.
+Re-running overwrites existing files.
