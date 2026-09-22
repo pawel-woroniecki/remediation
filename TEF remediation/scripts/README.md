@@ -294,3 +294,94 @@ python "TEF remediation/scripts/organize_tf_export.py" \
 Prints a per-repo file count for each environment and a grand total.
 Re-running is safe — files that already exist and are identical (same size and
 modification time) are skipped.
+
+---
+
+### 6. `organize_tf_export_flat.py`
+
+**Purpose**
+Variant of `organize_tf_export.py` that produces a **flat** folder layout: every
+Terraform resource file lands directly in `{env}/{repo}/` instead of in a nested
+`BigQueryDataset/` / `BigQueryTable/{dataset}/` subfolder. Resource type and dataset
+are encoded in the filename using a prefix:
+
+| Resource type | Filename pattern | Example |
+|---|---|---|
+| `BigQueryDataset` | `ds_{file}.tf` | `ds_il_5gias.tf` |
+| `BigQueryTable` | `t_{dataset}_{file}.tf` | `t_il_5gias_table_a.tf` |
+| `BigQueryRoutine` | `r_{dataset}_{file}.tf` | `r_il_5gias_routine_a.tf` |
+
+An `imports.tf` file is auto-generated alongside the resource files for each repo.
+It contains one native `import {}` block per resource (without a `module.` prefix),
+derived from the `# terraform import TYPE.NAME ID` comments that gcloud bulk-export
+embeds in every `.tf` file.
+
+Files whose dataset is not claimed by any repo land in `{env}/_unmapped/` using the
+same flat+prefix layout.
+
+Use this variant when you want to work with resources in a single Terraform root
+module per repo rather than in nested modules.
+
+**Output structure**
+```
+terraform-export-flat/
+└── prod/
+    ├── integration_layer/
+    │   ├── ds_il_5gias.tf
+    │   ├── t_il_5gias_table_a.tf
+    │   ├── t_il_5gias_table_b.tf
+    │   ├── r_il_5gias_routine_a.tf
+    │   └── imports.tf
+    ├── fault_mgmt/
+    │   └── ...
+    └── _unmapped/
+        └── t_shared_dataset_orphan_table.tf
+```
+
+**Prerequisites**
+Same as `organize_tf_export.py` — see Prerequisites section above.
+
+**Typical workflow**
+
+Step 1 — generate and download the dataset→repo mapping (shared with `organize_tf_export.py`):
+```bash
+gcloud run jobs execute devops-reports-dataset-mapping \
+  --region europe-west3 \
+  --project tefde-gcp-fastoss-dev-gke \
+  --wait
+
+gsutil cp \
+  gs://tefde-gcp-fastoss-dev-gcs-devops-reports/dataset-mapping/dataset_repo_map.json \
+  .
+```
+
+Step 2 — dry run to preview:
+```bash
+cd ~/remediation
+python "TEF remediation/scripts/organize_tf_export_flat.py" \
+  --mapping-file dataset_repo_map.json \
+  --env prod \
+  --dry-run
+```
+
+Step 3 — run for real:
+```bash
+python "TEF remediation/scripts/organize_tf_export_flat.py" \
+  --mapping-file dataset_repo_map.json \
+  --env prod
+```
+
+**All options**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--mapping-file PATH` | _(none)_ | JSON file from the `dataset_mapping` Cloud Run job. When provided, `--repos-dir` is ignored. |
+| `--repos-dir PATH` | `/workspace/repos/fastossb` | Local repo clones with `.gitlab-ci.yml` files. Used only if `--mapping-file` is not given. |
+| `--base-dir PATH` | `/home/nq10083194` | Parent of `tf_export_*` export directories. |
+| `--output-dir PATH` | `{base-dir}/terraform-export-flat` | Destination root for the reorganised files. |
+| `--env / --envs LIST` | all six | Comma-separated list of environments to process: `prod`, `prod-gke`, `test`, `test-gke`, `dev`, `dev-gke`. |
+| `--dry-run` | off | Print what would be copied without writing any files. |
+
+**Output**
+Prints a per-repo file count for each environment and a grand total.
+Re-running is safe — identical files (same size and modification time) are skipped.
