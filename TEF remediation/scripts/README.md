@@ -377,7 +377,8 @@ python "TEF remediation/scripts/organize_tf_export_flat.py" \
 |---|---|---|
 | `--mapping-file PATH` | _(none)_ | JSON file from the `dataset_mapping` Cloud Run job. When provided, `--repos-dir` is ignored. |
 | `--repos-dir PATH` | `/workspace/repos/fastossb` | Local repo clones with `.gitlab-ci.yml` files. Used only if `--mapping-file` is not given. |
-| `--base-dir PATH` | `/home/nq10083194` | Parent of `tf_export_*` export directories. |
+| `--exports-dir PATH` | _(none)_ | Parent of per-environment export folders named after the env (e.g. `gcp-exports/prod/`). Use this when your export directories are not named `tf_export_{env}`. When provided, `--base-dir` is ignored for locating exports. |
+| `--base-dir PATH` | `/home/nq10083194` | Parent of `tf_export_{env}` export directories. Ignored when `--exports-dir` is provided. |
 | `--output-dir PATH` | `{base-dir}/terraform-export-flat` | Destination root for the reorganised files. |
 | `--env / --envs LIST` | all six | Comma-separated list of environments to process: `prod`, `prod-gke`, `test`, `test-gke`, `dev`, `dev-gke`. |
 | `--dry-run` | off | Print what would be copied without writing any files. |

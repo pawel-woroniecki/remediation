@@ -167,9 +167,9 @@ def build_dataset_repo_map(repos_dir: Path) -> dict[str, str]:
 # Phase 2 — walk export dirs and copy files
 # ---------------------------------------------------------------------------
 
-def _iter_resource_roots(base_dir: Path, env: str, project_id: str):
+def _iter_resource_roots(base_dir: Path, env: str, project_id: str, exports_dir: Path | None = None):
     """Yield (resource_type, root_path) for all candidate roots that exist."""
-    export_dir = base_dir / f"tf_export_{env}"
+    export_dir = (exports_dir / env) if exports_dir else (base_dir / f"tf_export_{env}")
     if not export_dir.exists():
         print(f"  [SKIP] Export dir not found: {export_dir}")
         return
@@ -204,11 +204,11 @@ def dataset_from_tf(tf_file: Path) -> str:
     return ""
 
 
-def collect_tf_files(base_dir: Path, env: str, project_id: str) -> list[tuple[str, str, Path]]:
+def collect_tf_files(base_dir: Path, env: str, project_id: str, exports_dir: Path | None = None) -> list[tuple[str, str, Path]]:
     """Return list of (resource_type, dataset_name, absolute_path) for every .tf file."""
     results = []
     seen_roots: set[Path] = set()
-    for rtype, root in _iter_resource_roots(base_dir, env, project_id):
+    for rtype, root in _iter_resource_roots(base_dir, env, project_id, exports_dir):
         if root in seen_roots:
             continue
         seen_roots.add(root)
@@ -241,9 +241,10 @@ def process_env(
     output_dir: Path,
     dataset_repo_map: dict[str, str],
     dry_run: bool,
+    exports_dir: Path | None = None,
 ) -> dict[str, int]:
     """Walk one environment's export and copy files to the flat output tree."""
-    tf_files = collect_tf_files(base_dir, env, project_id)
+    tf_files = collect_tf_files(base_dir, env, project_id, exports_dir)
     if not tf_files:
         print(f"  [SKIP] No .tf files found for env={env} project={project_id}")
         return {}
@@ -300,7 +301,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--base-dir", default="/home/nq10083194",
-        help="Parent of tf_export_* dirs (default: /home/nq10083194)",
+        help="Parent of tf_export_* dirs (default: /home/nq10083194). "
+             "Ignored when --exports-dir is provided.",
+    )
+    parser.add_argument(
+        "--exports-dir", default=None,
+        help="Parent directory whose subfolders are named after environments "
+             "(e.g. /home/nq10083194/gcp-exports, containing prod/, test/, dev/, …). "
+             "When provided, --base-dir is ignored for locating export files.",
     )
     parser.add_argument(
         "--output-dir", default=None,
@@ -322,6 +330,7 @@ def main() -> None:
 
     base_dir = Path(args.base_dir)
     repos_dir = Path(args.repos_dir)
+    exports_dir = Path(args.exports_dir) if args.exports_dir else None
     output_dir = Path(args.output_dir) if args.output_dir else base_dir / "terraform-export-flat"
     envs_raw = args.envs if args.envs else ",".join(ENV_TO_PROJECT)
     envs = [e.strip() for e in envs_raw.split(",") if e.strip()]
@@ -349,7 +358,7 @@ def main() -> None:
     for env in envs:
         project_id = ENV_TO_PROJECT[env]
         print(f"[{env}] → {project_id}")
-        counts = process_env(env, project_id, base_dir, output_dir, dataset_repo_map, args.dry_run)
+        counts = process_env(env, project_id, base_dir, output_dir, dataset_repo_map, args.dry_run, exports_dir)
         env_total = sum(counts.values())
         grand_total += env_total
         unmapped = counts.pop("_unmapped", 0)
