@@ -104,6 +104,16 @@ TEF remediation/
 │
 ├── IAM_admin_instructions.md               # Manual IAM grant instructions for GCP admins
 │
+├── scripts/                                # One-off utility scripts (run manually from Cloud Shell — not deployed to Cloud Run)
+│   ├── README.md                           # Full usage guide for all scripts
+│   ├── backfill_env_drift_report_links.py  # Backfills gcs_report_path for historical env_drift rows that have NULL
+│   ├── copy_composer_dags.py               # Copies prod Composer DAGs to test/dev bucket with env-name substitution
+│   ├── composer_dag_status_report.py       # Snapshot report of latest DAG run status for all Composer environments
+│   ├── generate_dataset_mapping.py         # Cloud Run job: reads BQ_DATASET_NAMES from all repos, writes dataset→repo JSON to GCS
+│   ├── organize_tf_export.py               # Reorganises gcloud bulk-export .tf files into nested {env}/{repo}/BigQueryTable/{dataset}/ folders
+│   ├── organize_tf_export_flat.py          # Variant of above: flat layout — all files in {env}/{repo}/ with ds_/t_/r_ prefix
+│   └── propagate_tf_env.py                 # Copies prod/ flat-export to prod_dev-gke/ and prod_test/, substituting the env token throughout
+│
 └── Terraform/
     ├── BQ variables.tf       # All input variables
     ├── BQ DS + Tables.tf     # Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true); IAM bindings commented out — managed by TEF IAM Team
