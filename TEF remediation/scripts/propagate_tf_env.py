@@ -10,30 +10,39 @@ Reads all files from {flat_dir}/prod/, copies them into two sibling folders:
 The substitution replaces 'prod' only when it appears as a standalone
 environment token — not as part of words like 'production' or 'product'.
 
-Replacement rule:  (?<![a-zA-Z])prod(?![a-zA-Z])
+TWO-PASS REPLACEMENT
+Some naming conventions use a shorter alias for certain environments
+(e.g. 'dev' instead of 'dev-gke' in label values and KMS key names).
+The script handles this with two passes per file:
 
-Examples of strings that ARE changed:
-    tefde-gcp-fastoss-prod          → tefde-gcp-fastoss-dev-gke
-    fastoss-prod-gcs-devops-bucket  → fastoss-dev-gke-gcs-devops-bucket
-    group-prod@domain.com           → group-dev-gke@domain.com
+  Pass 1 — SHORT patterns: 'prod' adjacent to underscores (label values
+            like 'prod_live') and any extra patterns given via
+            --short-env-pattern.  These use the short env alias
+            ('dev' for dev-gke, 'test' for test — same in this case).
 
-Examples of strings that are NOT changed:
-    "production"    (followed by 'u' — word boundary rule)
-    "product"       (followed by 'u' — word boundary rule)
-    "managed-by-cnrm"  (does not contain 'prod')
+  Pass 2 — FULL replacement: all remaining 'prod' tokens use the full
+            env name ('dev-gke', 'test').
 
-NOTE: If prod/ files contain cross-project references to tefde-gcp-fastoss-prod-gke,
-the substitution turns '-prod-' into '-dev-gke-' producing '...dev-gke-gke'.
-Use --dry-run to review before applying, and fix those occurrences manually.
+Examples:
+    prod_live                       → dev_live          (pass 1 — underscore)
+    ndl-prod-kms-thales-key-ew3    → ndl-dev-kms-...   (pass 1 — custom pattern)
+    tefde-gcp-fastoss-prod          → tefde-gcp-fastoss-dev-gke  (pass 2)
+    fastoss-prod-gcs-bucket         → fastoss-dev-gke-gcs-bucket (pass 2)
+    "production"                    → unchanged  (contains letter after prod)
+    "product"                       → unchanged  (contains letter after prod)
 
 Usage:
     python propagate_tf_env.py --flat-dir /home/nq10083194/terraform-export-flat
     python propagate_tf_env.py --flat-dir /home/nq10083194/terraform-export-flat --dry-run
+    python propagate_tf_env.py --flat-dir /home/nq10083194/terraform-export-flat \
+        --short-env-pattern "ndl-prod"
 
 Options:
-    --flat-dir PATH   Parent of the prod/ source folder
-                      (default: /home/nq10083194/terraform-export-flat)
-    --dry-run         Print planned writes and substitution samples without writing files
+    --flat-dir PATH            Parent of the prod/ source folder
+                               (default: /home/nq10083194/terraform-export-flat)
+    --short-env-pattern REGEX  Extra regex where 'prod' should use the short env alias
+                               instead of the full name. Repeatable.
+    --dry-run                  Print planned writes and substitution samples without writing
 """
 
 import argparse
@@ -47,6 +56,20 @@ from pathlib import Path
 #   - not followed by a letter  (same protection)
 PROD_RE = re.compile(r'(?<![a-zA-Z])prod(?![a-zA-Z])')
 
+# Short env alias used in label values and resource names that don't use the
+# full compound environment name (e.g. 'dev' instead of 'dev-gke').
+SHORT_ENV: dict[str, str] = {
+    "dev-gke": "dev",
+    "test":    "test",   # same — no difference for test
+}
+
+# Default patterns where the SHORT alias should be used (pass 1).
+# These cover 'prod' adjacent to underscores, e.g. prod_live → dev_live.
+DEFAULT_SHORT_PATTERNS: list[str] = [
+    r"(?<![a-zA-Z_])prod(?=_)",   # prod followed by _  (e.g. prod_live)
+    r"(?<=_)prod(?![a-zA-Z_])",   # prod preceded by _  (e.g. status_prod)
+]
+
 # Source environment and its output folder name per target environment.
 TARGETS: dict[str, str] = {
     "dev-gke": "prod_dev-gke",
@@ -54,20 +77,41 @@ TARGETS: dict[str, str] = {
 }
 
 
-def replace_env(content: str, target_env: str) -> tuple[str, int]:
-    """Return (new_content, substitution_count)."""
-    count = 0
+def replace_env(
+    content: str,
+    target_env: str,
+    short_patterns: list[re.Pattern],
+) -> tuple[str, int]:
+    """Two-pass replacement. Return (new_content, substitution_count).
 
-    def _sub(m: re.Match) -> str:
-        nonlocal count
-        count += 1
-        return target_env
+    Pass 1: patterns that use the short env alias (e.g. 'dev' for 'dev-gke').
+    Pass 2: remaining 'prod' tokens replaced with the full env name.
+    """
+    short_env = SHORT_ENV.get(target_env, target_env)
+    total = 0
 
-    new_content = PROD_RE.sub(_sub, content)
-    return new_content, count
+    # Pass 1 — short alias (only meaningful when short differs from full)
+    if short_env != target_env and short_patterns:
+        for pattern in short_patterns:
+            content, n = pattern.subn(
+                lambda m, e=short_env: m.group(0).replace("prod", e),
+                content,
+            )
+            total += n
+
+    # Pass 2 — full env name for all remaining 'prod' tokens
+    content, n = PROD_RE.subn(lambda m: target_env, content)
+    total += n
+
+    return content, total
 
 
-def propagate(src_dir: Path, flat_dir: Path, dry_run: bool) -> None:
+def propagate(
+    src_dir: Path,
+    flat_dir: Path,
+    dry_run: bool,
+    short_patterns: list[re.Pattern],
+) -> None:
     all_files = sorted(f for f in src_dir.rglob("*") if f.is_file())
     if not all_files:
         print(f"  [SKIP] No files found under {src_dir}")
@@ -75,7 +119,9 @@ def propagate(src_dir: Path, flat_dir: Path, dry_run: bool) -> None:
 
     for target_env, folder_name in TARGETS.items():
         dst_root = flat_dir / folder_name
-        print(f"\n=== {folder_name}/  (prod → {target_env}) ===")
+        short_env = SHORT_ENV.get(target_env, target_env)
+        label = f"prod → {short_env} (short) then → {target_env} (full)" if short_env != target_env else f"prod → {target_env}"
+        print(f"\n=== {folder_name}/  ({label}) ===")
 
         total_files = 0
         total_subs = 0
@@ -96,7 +142,7 @@ def propagate(src_dir: Path, flat_dir: Path, dry_run: bool) -> None:
                 total_files += 1
                 continue
 
-            new_content, subs = replace_env(content, target_env)
+            new_content, subs = replace_env(content, target_env, short_patterns)
 
             if dry_run:
                 status = f"{subs} substitution(s)" if subs else "no changes"
@@ -136,6 +182,16 @@ def main() -> None:
              "(default: /home/nq10083194/terraform-export-flat)",
     )
     parser.add_argument(
+        "--short-env-pattern",
+        action="append",
+        dest="short_patterns",
+        default=None,
+        metavar="REGEX",
+        help="Extra regex pattern where 'prod' should be replaced with the short "
+             "env alias (e.g. 'dev' for dev-gke) instead of the full env name. "
+             "Repeatable. Example: --short-env-pattern 'ndl-prod'",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print planned writes and substitution samples without writing files",
@@ -152,11 +208,18 @@ def main() -> None:
         print(f"ERROR: prod/ source folder not found: {src_dir}")
         sys.exit(1)
 
+    # Compile short-env patterns (defaults + any user-supplied extras)
+    raw_short = list(DEFAULT_SHORT_PATTERNS)
+    if args.short_patterns:
+        raw_short.extend(args.short_patterns)
+    short_patterns = [re.compile(p) for p in raw_short]
+
     print(f"Source      : {src_dir}")
     print(f"Targets     : {', '.join(TARGETS.values())}")
+    print(f"Short alias : {SHORT_ENV}")
     print(f"Mode        : {'DRY-RUN' if args.dry_run else 'LIVE'}")
 
-    propagate(src_dir, flat_dir, args.dry_run)
+    propagate(src_dir, flat_dir, args.dry_run, short_patterns)
 
     print(f"\n{'[DRY-RUN] ' if args.dry_run else ''}Done.")
 
