@@ -64,10 +64,12 @@ SHORT_ENV: dict[str, str] = {
 }
 
 # Default patterns where the SHORT alias should be used (pass 1).
-# These cover 'prod' adjacent to underscores, e.g. prod_live → dev_live.
+# These cover 'prod' adjacent to underscores (label values like prod_live)
+# and KMS key names that use the short env token (ndl-prod-kms-...).
 DEFAULT_SHORT_PATTERNS: list[str] = [
     r"(?<![a-zA-Z_])prod(?=_)",   # prod followed by _  (e.g. prod_live)
     r"(?<=_)prod(?![a-zA-Z_])",   # prod preceded by _  (e.g. status_prod)
+    r"ndl-prod",                   # KMS key names: ndl-prod-kms-... → ndl-dev-kms-...
 ]
 
 # Lifecycle block injected into every google_bigquery_dataset resource in
