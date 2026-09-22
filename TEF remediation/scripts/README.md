@@ -359,6 +359,7 @@ Step 2 — dry run to preview:
 ```bash
 cd ~/remediation
 python "TEF remediation/scripts/organize_tf_export_flat.py" \
+  --exports-dir /home/nq10083194/gcp-exports \
   --mapping-file dataset_repo_map.json \
   --env prod \
   --dry-run
@@ -367,6 +368,7 @@ python "TEF remediation/scripts/organize_tf_export_flat.py" \
 Step 3 — run for real:
 ```bash
 python "TEF remediation/scripts/organize_tf_export_flat.py" \
+  --exports-dir /home/nq10083194/gcp-exports \
   --mapping-file dataset_repo_map.json \
   --env prod
 ```
