@@ -219,8 +219,43 @@ def collect_tf_files(base_dir: Path, env: str, project_id: str, exports_dir: Pat
     return results
 
 
-def copy_file(src: Path, dst: Path, dry_run: bool) -> bool:
-    """Copy src to dst. Return True if the file was (would be) copied."""
+def inject_deletion_protection(content: str) -> str:
+    """Insert deletion_protection = false into google_bigquery_table resources.
+
+    gcloud bulk-export never emits this Terraform-only flag, so we add it
+    during reorganisation so that tables can be replaced by Terraform without
+    hitting the deletion_protection guard.  The flag is inserted right after
+    the opening brace of each resource block.
+    """
+    if 'resource "google_bigquery_table"' not in content:
+        return content
+    if "deletion_protection" in content:
+        return content  # already present — don't duplicate
+    return re.sub(
+        r'(resource\s+"google_bigquery_table"\s+"[^"]+"\s*\{)',
+        r'\1\n  deletion_protection = false',
+        content,
+    )
+
+
+def copy_file(src: Path, dst: Path, dry_run: bool, content: str | None = None) -> bool:
+    """Copy src to dst (or write content if provided). Return True if written."""
+    if content is not None:
+        # Text file with possible injected content — compare by value, not mtime.
+        if dst.exists():
+            try:
+                if dst.read_text(encoding="utf-8") == content:
+                    return False  # identical — skip
+            except Exception:
+                pass
+        if dry_run:
+            print(f"    [DRY-RUN] {src} → {dst}")
+            return True
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(content, encoding="utf-8")
+        return True
+
+    # Binary copy (original size+mtime optimisation).
     if dst.exists():
         src_stat = src.stat()
         dst_stat = dst.stat()
@@ -265,7 +300,12 @@ def process_env(
             new_name = f"r_{ds_name}_{src.name}"
 
         dst = env_out / repo / new_name
-        copied = copy_file(src, dst, dry_run)
+        try:
+            raw = src.read_text(encoding="utf-8")
+            transformed = inject_deletion_protection(raw)
+            copied = copy_file(src, dst, dry_run, content=transformed)
+        except UnicodeDecodeError:
+            copied = copy_file(src, dst, dry_run)
         if copied:
             counts[repo] += 1
         if repo != "_unmapped":
