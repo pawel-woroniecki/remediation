@@ -461,8 +461,8 @@ Output files use the same directory structure as `gcloud bulk-export`:
 
 ```
 {exports_dir}/{env}/projects/{project_id}/BigQueryDataset/{dataset_id}.tf
-{exports_dir}/{env}/projects/{project_id}/BigQueryTable/{dataset_id}/{table_id}.tf
-{exports_dir}/{env}/projects/{project_id}/BigQueryRoutine/{dataset_id}/{routine_id}.tf
+{exports_dir}/{env}/projects/{project_id}/BigQueryTable/{table_id}.tf
+{exports_dir}/{env}/projects/{project_id}/BigQueryRoutine/{routine_id}.tf
 ```
 
 `organize_tf_export_flat.py` processes the combined output unchanged.

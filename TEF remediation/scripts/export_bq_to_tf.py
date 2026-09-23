@@ -10,8 +10,8 @@ This script queries the BigQuery API directly so every resource is captured.
 Output files use the same directory structure as gcloud bulk-export:
 
     {exports_dir}/{env}/projects/{project_id}/BigQueryDataset/{dataset_id}.tf
-    {exports_dir}/{env}/projects/{project_id}/BigQueryTable/{dataset_id}/{table_id}.tf
-    {exports_dir}/{env}/projects/{project_id}/BigQueryRoutine/{dataset_id}/{routine_id}.tf
+    {exports_dir}/{env}/projects/{project_id}/BigQueryTable/{table_id}.tf
+    {exports_dir}/{env}/projects/{project_id}/BigQueryRoutine/{routine_id}.tf
 
 organize_tf_export_flat.py can therefore process the combined output unchanged.
 
@@ -328,13 +328,13 @@ def export_project(
                 if table.table_type == "SNAPSHOT":
                     print(f"  SKIP (snapshot): {t_item.table_id}")
                     continue
-                p      = project_root / "BigQueryTable" / ds_id / f"{table.table_id}.tf"
+                p      = project_root / "BigQueryTable" / f"{table.table_id}.tf"
                 status = write_hcl(p, table_hcl(project, table), overwrite, dry_run)
                 if   status == "written":
                     w += 1
-                    print(f"  table    {ds_id}/{table.table_id}.tf  [{table.table_type}] → written")
+                    print(f"  table    {table.table_id}.tf  [{table.table_type}] → written")
                 elif status == "dry-run":
-                    print(f"  [DRY-RUN] table/{ds_id}/{table.table_id}.tf  [{table.table_type}]")
+                    print(f"  [DRY-RUN] table/{table.table_id}.tf  [{table.table_type}]")
                 else:
                     s += 1
             except Exception as exc:
@@ -350,13 +350,13 @@ def export_project(
         for r_item in routines_list:
             try:
                 routine = client.get_routine(f"{project}.{ds_id}.{r_item.routine_id}")
-                p       = project_root / "BigQueryRoutine" / ds_id / f"{routine.routine_id}.tf"
+                p       = project_root / "BigQueryRoutine" / f"{routine.routine_id}.tf"
                 status  = write_hcl(p, routine_hcl(project, routine), overwrite, dry_run)
                 if   status == "written":
                     w += 1
-                    print(f"  routine  {ds_id}/{routine.routine_id}.tf → written")
+                    print(f"  routine  {routine.routine_id}.tf → written")
                 elif status == "dry-run":
-                    print(f"  [DRY-RUN] routine/{ds_id}/{routine.routine_id}.tf")
+                    print(f"  [DRY-RUN] routine/{routine.routine_id}.tf")
                 else:
                     s += 1
             except Exception as exc:
