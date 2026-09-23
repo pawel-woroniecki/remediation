@@ -112,7 +112,8 @@ TEF remediation/
 │   ├── generate_dataset_mapping.py         # Cloud Run job: reads BQ_DATASET_NAMES from all repos, writes dataset→repo JSON to GCS
 │   ├── organize_tf_export.py               # Reorganises gcloud bulk-export .tf files into nested {env}/{repo}/BigQueryTable/{dataset}/ folders
 │   ├── organize_tf_export_flat.py          # Variant of above: flat layout — all files in {env}/{repo}/ with ds_/t_/r_ prefix
-│   └── propagate_tf_env.py                 # Copies prod/ flat-export to prod_dev-gke/ and prod_test/, substituting the env token throughout
+│   ├── propagate_tf_env.py                 # Copies prod/ flat-export to prod_dev-gke/ and prod_test/, substituting the env token throughout
+│   └── export_bq_to_tf.py                  # Supplements gcloud bulk-export: queries BQ API directly and generates HCL for all datasets/tables/routines
 │
 └── Terraform/
     ├── BQ variables.tf       # All input variables

@@ -446,3 +446,74 @@ Creates `prod_dev-gke/` and `prod_test/` as siblings of `prod/`, each mirroring
 the full folder structure of `prod/` with environment tokens substituted.
 Prints a per-target file count and total substitution count.
 Re-running overwrites existing files.
+
+---
+
+### 8. `export_bq_to_tf.py`
+
+**Purpose**
+Supplements `gcloud beta resource-config bulk-export` by querying the BigQuery API
+directly and generating Terraform HCL for every dataset, table, and routine in a
+project. Use this when bulk-export misses resources because they are not indexed in
+Cloud Asset Inventory (CAI).
+
+Output files use the same directory structure as `gcloud bulk-export`:
+
+```
+{exports_dir}/{env}/projects/{project_id}/BigQueryDataset/{dataset_id}.tf
+{exports_dir}/{env}/projects/{project_id}/BigQueryTable/{dataset_id}/{table_id}.tf
+{exports_dir}/{env}/projects/{project_id}/BigQueryRoutine/{dataset_id}/{routine_id}.tf
+```
+
+`organize_tf_export_flat.py` processes the combined output unchanged.
+
+Default behaviour is **supplement mode**: existing `.tf` files are skipped so the
+gcloud export is not overwritten. Use `--overwrite` to regenerate everything.
+
+All generated table files include `deletion_protection = false`.
+
+**IAM required**
+- `roles/bigquery.metadataViewer` on the project (to list datasets, tables, routines)
+
+**Run**
+```bash
+cd ~/remediation
+
+# Supplement the existing gcloud bulk-export for prod (skips existing files)
+python "TEF remediation/scripts/export_bq_to_tf.py" \
+  --project tefde-gcp-fastoss-prod \
+  --exports-dir /home/nq10083194/gcp-exports \
+  --env prod
+
+# Only a specific dataset
+python "TEF remediation/scripts/export_bq_to_tf.py" \
+  --project tefde-gcp-fastoss-prod \
+  --exports-dir /home/nq10083194/gcp-exports \
+  --env prod \
+  --dataset pl_energy
+
+# Dry run to preview what would be written
+python "TEF remediation/scripts/export_bq_to_tf.py" \
+  --project tefde-gcp-fastoss-prod \
+  --exports-dir /home/nq10083194/gcp-exports \
+  --env prod \
+  --dry-run
+```
+
+After running, re-run `organize_tf_export_flat.py` as usual — it picks up the
+newly generated files together with the existing gcloud output.
+
+**All options**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--project ID` | _(required)_ | GCP project ID. |
+| `--env NAME` | `prod` | Environment name used as the subdirectory under `--exports-dir`. |
+| `--exports-dir PATH` | `/home/nq10083194/gcp-exports` | Parent of per-env export folders. |
+| `--overwrite` | off | Overwrite `.tf` files that already exist (default: skip). |
+| `--dataset DATASET_ID` | all | Only export this dataset. Repeatable. |
+| `--dry-run` | off | Print planned writes without writing files. |
+
+**Output**
+Prints per-dataset counts of files written, skipped, and errors.
+Table type (`TABLE`, `VIEW`, `MATERIALIZED_VIEW`, `EXTERNAL`) is shown for each written file.
