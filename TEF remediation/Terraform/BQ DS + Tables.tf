@@ -1026,3 +1026,64 @@ resource "google_bigquery_table" "file_drift_report" {
   }
 }
 
+# ---------------------------------------------------------------------------
+# BQ structure drift — partitioning / clustering comparison across envs
+# ---------------------------------------------------------------------------
+
+resource "google_bigquery_table" "bq_structure_drift" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "bq_structure_drift"
+  deletion_protection = true
+
+  schema = jsonencode([
+    { name = "run_id",        type = "STRING",    mode = "REQUIRED" },
+    { name = "checked_at",    type = "TIMESTAMP", mode = "REQUIRED" },
+    { name = "dataset_id",    type = "STRING",    mode = "REQUIRED" },
+    { name = "table_id",      type = "STRING",    mode = "REQUIRED" },
+    { name = "table_type",    type = "STRING" },
+    { name = "discrepancy",   type = "STRING",    mode = "REQUIRED" },
+    { name = "attribute",     type = "STRING",    mode = "REQUIRED" },
+    { name = "prod_value",    type = "STRING" },
+    { name = "test_value",    type = "STRING" },
+    { name = "dev_gke_value", type = "STRING" },
+  ])
+
+  time_partitioning {
+    type  = "DAY"
+    field = "checked_at"
+  }
+
+  clustering = ["dataset_id"]
+}
+
+resource "google_bigquery_table" "bq_structure_drift_report" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "bq_structure_drift_report"
+  deletion_protection = false
+
+  view {
+    use_legacy_sql = false
+    query          = <<-EOT
+      SELECT
+        run_id,
+        checked_at,
+        DATE(checked_at)  AS run_date,
+        dataset_id,
+        table_id,
+        table_type,
+        discrepancy,
+        attribute,
+        prod_value,
+        test_value,
+        dev_gke_value,
+        ROW_NUMBER() OVER (
+          PARTITION BY dataset_id, table_id, attribute
+          ORDER BY checked_at DESC
+        ) AS run_number
+      FROM `${var.reporting_project_id}.devops_reports.bq_structure_drift`
+    EOT
+  }
+}
+

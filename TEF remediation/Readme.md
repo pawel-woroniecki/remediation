@@ -113,7 +113,8 @@ TEF remediation/
 │   ├── organize_tf_export.py               # Reorganises gcloud bulk-export .tf files into nested {env}/{repo}/BigQueryTable/{dataset}/ folders
 │   ├── organize_tf_export_flat.py          # Variant of above: flat layout — all files in {env}/{repo}/ with ds_/t_/r_ prefix
 │   ├── propagate_tf_env.py                 # Copies prod/ flat-export to prod_dev-gke/ and prod_test/, substituting the env token throughout
-│   └── export_bq_to_tf.py                  # Supplements gcloud bulk-export: queries BQ API directly and generates HCL for all datasets/tables/routines
+│   ├── export_bq_to_tf.py                  # Supplements gcloud bulk-export: queries BQ API directly and generates HCL for all datasets/tables/routines
+│   └── compare_bq_structure.py             # Compares partitioning & clustering across prod/test/dev-gke; writes drift rows to devops_reports.bq_structure_drift
 │
 └── Terraform/
     ├── BQ variables.tf       # All input variables
@@ -253,6 +254,8 @@ All 4 reports write into `devops_reports` in `tefde-gcp-fastoss-dev`, located in
 | `commit_drift_evidence_report` *(view)* | One row per file per commit — evidence level drill-through. Columns: `repo`, `drift_direction` (⚠ prefix on the 3 critical directions), `commit_sha`, `author`, `commit_date`, `file_path`. Use as a second data source on the commit drift dashboard for the evidence table. |
 | `file_drift_report` *(view)* | Per-repo × drift-direction file drift detail with `run_number`. Same Filter Control setup as `commit_drift_report`. Includes `files_added`, `files_modified`, `files_deleted`, `files_other`. |
 | `management_dashboard` *(view)* | Management red/green health grid: joins env drift, commit drift, and file drift per repo × date into a single row with a `status` column (`All clear` / `Has findings`). Use as a Looker Studio data source for the executive summary dashboard. |
+| `bq_structure_drift` | One row per discrepancy per run: partitioning and clustering differences (or missing tables) across prod, test, and dev-gke. Partitioned by `checked_at` (DAY), clustered by `dataset_id`. Written by `compare_bq_structure.py`. |
+| `bq_structure_drift_report` *(view)* | Adds `run_date` and `run_number` (1 = latest run for that dataset/table/attribute). Use as Looker Studio data source; add Filter Controls on `run_date` and `run_number`. |
 
 ---
 

@@ -517,3 +517,82 @@ newly generated files together with the existing gcloud output.
 **Output**
 Prints per-dataset counts of files written, skipped, and errors.
 Table type (`TABLE`, `VIEW`, `MATERIALIZED_VIEW`, `EXTERNAL`) is shown for each written file.
+
+---
+
+### 9. `compare_bq_structure.py`
+
+**Purpose**
+Compares BigQuery table partitioning and clustering settings across GCP environments
+(default: prod, test, dev-gke) and reports discrepancies. Designed to catch drift
+after propagating Terraform exports from prod to lower environments.
+
+For each table the script checks:
+- `time_partitioning` (type, field, expiration_ms, require_partition_filter)
+- `range_partitioning` (field, range start / end / interval)
+- `clustering_fields` (sorted list of column names)
+
+Two discrepancy classes are reported:
+- **MISSING** — table exists in prod but is absent from one or more lower envs
+- **DIFF** — table present in all envs but has different partitioning or clustering settings
+
+Results are written to `devops_reports.bq_structure_drift` in `tefde-gcp-fastoss-dev`
+(the same dataset used by all other reports). A companion view
+`bq_structure_drift_report` (created by Terraform) provides a `run_number` field for
+Looker Studio filtering.
+
+**IAM required**
+- `roles/bigquery.metadataViewer` on the prod, test, and dev-gke projects
+- `roles/bigquery.dataEditor` on `devops_reports.bq_structure_drift` in `tefde-gcp-fastoss-dev`
+
+**Run**
+```bash
+cd ~/remediation
+
+# Full report — all datasets, prod vs test vs dev-gke, write to BigQuery
+python "TEF remediation/scripts/compare_bq_structure.py"
+
+# Single dataset — faster, good for spot checks
+python "TEF remediation/scripts/compare_bq_structure.py" \
+  --dataset pl_energy
+
+# Also export a CSV
+python "TEF remediation/scripts/compare_bq_structure.py" \
+  --output bq_structure_report.csv
+
+# prod vs test only, skip BigQuery write
+python "TEF remediation/scripts/compare_bq_structure.py" \
+  --envs prod,test \
+  --no-bq
+```
+
+**All options**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--envs LIST` | `prod,test,dev-gke` | Comma-separated environments. First env is the reference (source of truth for MISSING checks). |
+| `--dataset DATASET_ID` | all | Only compare this dataset. Repeatable. |
+| `--reporting-project ID` | `tefde-gcp-fastoss-dev` | Project holding `devops_reports`. |
+| `--output PATH` | none | Also write results to a CSV file. |
+| `--no-bq` | off | Skip BigQuery write; print to terminal and/or CSV only. |
+| `--workers N` | `3` | Thread-pool size for parallel project fetching. |
+
+**Output**
+Terminal: summary counts (MISSING / DIFF), then a capped table of up to 50 rows.
+BigQuery: rows appended to `devops_reports.bq_structure_drift` (partitioned by `checked_at`, clustered by `dataset_id`).
+Each run gets a unique `run_id` (e.g. `20260924T143012Z`) so historical data is preserved for trending.
+
+**Looker Studio dashboard setup**
+
+Connect to the `bq_structure_drift_report` view in project `tefde-gcp-fastoss-dev`,
+dataset `devops_reports`.
+
+Suggested charts:
+1. **Scorecard** — count of rows where `discrepancy = 'MISSING'` and `run_number = 1`
+2. **Scorecard** — count of rows where `discrepancy = 'DIFF'` and `run_number = 1`
+3. **Table** — filter `run_number = 1`; columns: `dataset_id`, `table_id`, `table_type`, `discrepancy`, `attribute`, `prod_value`, `test_value`, `dev_gke_value`
+4. **Bar chart** — discrepancy count by `dataset_id` (latest run)
+5. **Time-series line chart** — total discrepancy count per `run_date` (trend over time)
+6. **Filter control** on `run_date` and `run_number`
+
+> "Enable date range parameters" must be **UNCHECKED** on this data source.
