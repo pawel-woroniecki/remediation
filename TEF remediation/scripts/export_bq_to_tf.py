@@ -174,7 +174,7 @@ def table_hcl(project: str, table: bigquery.Table) -> str:
 
     # Materialized view
     if ttype == "MATERIALIZED_VIEW":
-        mv = table.materialized_view
+        mv = getattr(table, 'materialized_view', None)
         if mv and mv.query:
             lines += ["", "  materialized_view {",
                       "    query = <<SQL_EOF", mv.query, "SQL_EOF"]
