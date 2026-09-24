@@ -146,6 +146,11 @@ def table_hcl(project: str, table: bigquery.Table) -> str:
         f'  table_id            = "{t_id}"',
         f'  deletion_protection = false',
     ]
+    # require_partition_filter is a top-level attribute in the current provider version
+    if table.time_partitioning is not None:
+        rpf = table.time_partitioning.require_partition_filter
+        rpf = rpf if rpf is not None else False
+        lines.append(f'  require_partition_filter = {str(rpf).lower()}')
     if table.description:
         lines.append(f'  description = "{hcl_str(table.description)}"')
 
@@ -187,9 +192,6 @@ def table_hcl(project: str, table: bigquery.Table) -> str:
             lines.append(f'    field = "{tp.field}"')
         if tp.expiration_ms is not None:
             lines.append(f"    expiration_ms = {int(tp.expiration_ms)}")
-        # fix: always emit — client returns None when API value is false (the default)
-        rpf = tp.require_partition_filter if tp.require_partition_filter is not None else False
-        lines.append(f"    require_partition_filter = {str(rpf).lower()}")
         lines.append("  }")
 
     # Range partitioning
