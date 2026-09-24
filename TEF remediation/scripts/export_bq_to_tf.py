@@ -82,10 +82,12 @@ def _schema_to_json(fields) -> list:
     result = []
     for f in fields:
         entry: dict = {"name": f.name, "type": f.field_type, "mode": f.mode}
-        if f.description:
+        if f.description is not None:          # fix: emit empty-string descriptions too
             entry["description"] = f.description
         if f.fields:
             entry["fields"] = _schema_to_json(f.fields)
+        if f.policy_tags and f.policy_tags.names:  # fix: preserve column-level security
+            entry["policyTags"] = {"names": list(f.policy_tags.names)}
         result.append(entry)
     return result
 
@@ -185,9 +187,9 @@ def table_hcl(project: str, table: bigquery.Table) -> str:
             lines.append(f'    field = "{tp.field}"')
         if tp.expiration_ms is not None:
             lines.append(f"    expiration_ms = {int(tp.expiration_ms)}")
-        if tp.require_partition_filter is not None:
-            lines.append(
-                f"    require_partition_filter = {str(tp.require_partition_filter).lower()}")
+        # fix: always emit — client returns None when API value is false (the default)
+        rpf = tp.require_partition_filter if tp.require_partition_filter is not None else False
+        lines.append(f"    require_partition_filter = {str(rpf).lower()}")
         lines.append("  }")
 
     # Range partitioning
@@ -218,6 +220,15 @@ def table_hcl(project: str, table: bigquery.Table) -> str:
     if table.labels:
         lines.append("")
         lines.extend(_labels_block(table.labels))
+
+    # Encryption (CMEK) — fix: omitting this block forces destroy+recreate on CMEK tables
+    if table.encryption_configuration and table.encryption_configuration.kms_key_name:
+        lines += [
+            "",
+            "  encryption_configuration {",
+            f'    kms_key_name = "{table.encryption_configuration.kms_key_name}"',
+            "  }",
+        ]
 
     lines += ["}", ""]
     return "\n".join(lines)
