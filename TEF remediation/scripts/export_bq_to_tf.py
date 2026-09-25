@@ -133,7 +133,7 @@ def dataset_hcl(project: str, ds: bigquery.Dataset) -> str:
 def table_hcl(project: str, table: bigquery.Table) -> str:
     ds_id  = table.dataset_id
     t_id   = table.table_id
-    label  = tf_label(t_id)
+    label  = tf_label(f"{ds_id}_{t_id}")
     ttype  = table.table_type  # TABLE / VIEW / MATERIALIZED_VIEW / EXTERNAL / SNAPSHOT
 
     lines = [
@@ -239,7 +239,7 @@ def table_hcl(project: str, table: bigquery.Table) -> str:
 def routine_hcl(project: str, routine: bigquery.Routine) -> str:
     ds_id = routine.dataset_id
     r_id  = routine.routine_id
-    label = tf_label(r_id)
+    label = tf_label(f"{ds_id}_{r_id}")
 
     rtype = routine.type_.name   if hasattr(routine.type_,    'name') else str(routine.type_)
     lang  = routine.language.name if hasattr(routine.language, 'name') else str(routine.language)
