@@ -341,7 +341,7 @@ def export_project(
                 if table.table_type == "SNAPSHOT":
                     print(f"  SKIP (snapshot): {t_item.table_id}")
                     continue
-                p      = project_root / "BigQueryTable" / f"{table.table_id}.tf"
+                p      = project_root / "BigQueryTable" / f"{ds_id}_{table.table_id}.tf"
                 status = write_hcl(p, table_hcl(project, table), overwrite, dry_run)
                 if   status == "written":
                     w += 1
@@ -363,7 +363,7 @@ def export_project(
         for r_item in routines_list:
             try:
                 routine = client.get_routine(f"{project}.{ds_id}.{r_item.routine_id}")
-                p       = project_root / "BigQueryRoutine" / f"{routine.routine_id}.tf"
+                p       = project_root / "BigQueryRoutine" / f"{ds_id}_{routine.routine_id}.tf"
                 status  = write_hcl(p, routine_hcl(project, routine), overwrite, dry_run)
                 if   status == "written":
                     w += 1
