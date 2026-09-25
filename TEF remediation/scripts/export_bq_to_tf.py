@@ -46,6 +46,7 @@ Options:
 """
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -64,6 +65,14 @@ def tf_label(name: str) -> str:
     if label and not label[0].isalpha():
         label = 'r_' + label
     return label
+
+
+def safe_stem(name: str, max_len: int = 200) -> str:
+    """Truncate a filename stem that exceeds filesystem limits, appending a hash for uniqueness."""
+    if len(name) <= max_len:
+        return name
+    h = hashlib.md5(name.encode()).hexdigest()[:8]
+    return name[:max_len - 9] + '_' + h
 
 
 def hcl_str(s: str) -> str:
@@ -341,7 +350,7 @@ def export_project(
                 if table.table_type == "SNAPSHOT":
                     print(f"  SKIP (snapshot): {t_item.table_id}")
                     continue
-                p      = project_root / "BigQueryTable" / f"{ds_id}_{table.table_id}.tf"
+                p      = project_root / "BigQueryTable" / f"{safe_stem(f'{ds_id}_{table.table_id}')}.tf"
                 status = write_hcl(p, table_hcl(project, table), overwrite, dry_run)
                 if   status == "written":
                     w += 1
@@ -363,7 +372,7 @@ def export_project(
         for r_item in routines_list:
             try:
                 routine = client.get_routine(f"{project}.{ds_id}.{r_item.routine_id}")
-                p       = project_root / "BigQueryRoutine" / f"{ds_id}_{routine.routine_id}.tf"
+                p       = project_root / "BigQueryRoutine" / f"{safe_stem(f'{ds_id}_{routine.routine_id}')}.tf"
                 status  = write_hcl(p, routine_hcl(project, routine), overwrite, dry_run)
                 if   status == "written":
                     w += 1
