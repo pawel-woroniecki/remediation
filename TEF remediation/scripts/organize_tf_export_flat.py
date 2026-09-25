@@ -11,10 +11,13 @@ It then walks the local tf_export_* directories and copies each .tf file into:
 
     {output_dir}/{env}/{repo_name}/{prefix}_{file}.tf
 
-where the prefix encodes the resource type and dataset:
-    ds_{file}.tf                   — BigQueryDataset  (e.g. ds_my_dataset.tf)
-    t_{dataset}_{file}.tf          — BigQueryTable    (e.g. t_stageai_tablename.tf)
-    r_{dataset}_{file}.tf          — BigQueryRoutine  (e.g. r_stageai_routinename.tf)
+where the prefix encodes the resource type:
+    ds_{file}.tf               — BigQueryDataset  (e.g. ds_my_dataset.tf)
+    t_{file}.tf                — BigQueryTable    (e.g. t_stageai_tablename.tf)
+    r_{file}.tf                — BigQueryRoutine  (e.g. r_stageai_routinename.tf)
+
+{file} already carries the dataset prefix (ds_id_table_id) as set by
+export_bq_to_tf.py, so no extra ds_name_ prefix is added here.
 
 All resource files for a repo land in the same flat directory, alongside an
 auto-generated imports.tf.
@@ -292,12 +295,14 @@ def process_env(
         repo = dataset_repo_map.get(ds_name, "_unmapped")
 
         # Build flat filename with resource-type prefix.
+        # src.name already carries the dataset prefix (ds_id_table_id.tf) from
+        # export_bq_to_tf.py, so we only add the resource-type letter here.
         if rtype == "BigQueryDataset":
             new_name = f"ds_{src.name}"
         elif rtype == "BigQueryTable":
-            new_name = f"t_{ds_name}_{src.name}"
+            new_name = f"t_{src.name}"
         else:  # BigQueryRoutine
-            new_name = f"r_{ds_name}_{src.name}"
+            new_name = f"r_{src.name}"
 
         dst = env_out / repo / new_name
         try:
