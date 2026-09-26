@@ -268,6 +268,26 @@ def routine_hcl(project: str, routine: bigquery.Routine) -> str:
         body,
         "BODY_EOF",
     ]
+    # return_type — required for non-SQL routines (JavaScript etc.)
+    props = getattr(routine, '_properties', {})
+    rt = props.get('returnType')
+    if rt:
+        lines.append(f'  return_type = {json.dumps(json.dumps(rt))}')
+
+    # arguments — one block per parameter
+    for arg in props.get('arguments', []):
+        lines += ["", "  arguments {"]
+        if arg.get('name'):
+            lines.append(f'    name          = "{hcl_str(arg["name"])}"')
+        ak = arg.get('argumentKind', 'FIXED_TYPE')
+        lines.append(f'    argument_kind = "{ak}"')
+        if arg.get('mode'):
+            lines.append(f'    mode          = "{arg["mode"]}"')
+        dt = arg.get('dataType')
+        if dt:
+            lines.append(f'    data_type     = {json.dumps(json.dumps(dt))}')
+        lines.append("  }")
+
     if routine.description:
         lines.append(f'  description = "{hcl_str(routine.description)}"')
     lines += ["}", ""]
