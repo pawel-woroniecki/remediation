@@ -56,6 +56,16 @@ from pathlib import Path
 #   - not followed by a letter  (same protection)
 PROD_RE = re.compile(r'(?<![a-zA-Z])prod(?![a-zA-Z])')
 
+# Matches any HCL heredoc block: <<MARKER\n ... \nMARKER
+# Used to protect SQL queries and routine bodies from loose prod-replacement.
+_HEREDOC_RE = re.compile(r'(<<([A-Z0-9_]+)\n)(.*?)(\n\2(?:\b|$))', re.DOTALL)
+
+# Inside heredoc blocks (SQL queries, routine bodies, JSON schemas) only the
+# GCP project ID is replaced — not loose 'prod' tokens — to avoid renaming
+# SQL column aliases or table names that contain 'prod' as a functional word
+# (e.g. prod_max_dn_bw, jfm_v_prod_dtm_basic).
+_GCP_PROJECT_PROD_RE = re.compile(r'tefde-gcp-fastoss-prod(?![-a-zA-Z0-9])')
+
 # Short env alias used in label values and resource names that don't use the
 # full compound environment name (e.g. 'dev' instead of 'dev-gke').
 SHORT_ENV: dict[str, str] = {
@@ -98,11 +108,36 @@ def replace_env(
 ) -> tuple[str, int]:
     """Two-pass replacement. Return (new_content, substitution_count).
 
+    Heredoc blocks (SQL queries, routine bodies, JSON schemas) are extracted
+    first and protected from the loose prod-replacement.  Inside them only the
+    GCP project ID (tefde-gcp-fastoss-prod) is substituted, so SQL column
+    aliases and table names that contain 'prod' as a functional word are left
+    unchanged (e.g. prod_max_dn_bw, jfm_v_prod_dtm_basic).
+
     Pass 1: patterns that use the short env alias (e.g. 'dev' for 'dev-gke').
     Pass 2: remaining 'prod' tokens replaced with the full env name.
+    Both passes run only on non-heredoc HCL content.
     """
     short_env = SHORT_ENV.get(target_env, target_env)
     total = 0
+
+    # --- Step 1: extract heredoc blocks, apply restricted replacement inside them ---
+    _store: dict[str, str] = {}
+
+    def _protect_heredoc(m: re.Match) -> str:
+        body = m.group(3)
+        new_body, n = _GCP_PROJECT_PROD_RE.subn(
+            f"tefde-gcp-fastoss-{target_env}", body
+        )
+        nonlocal total
+        total += n
+        key = f"\x00HD{len(_store)}\x00"
+        _store[key] = m.group(1) + new_body + m.group(4)
+        return key
+
+    content = _HEREDOC_RE.sub(_protect_heredoc, content)
+
+    # --- Step 2: two-pass replacement on non-heredoc HCL content ---
 
     # Pass 1 — short alias (only meaningful when short differs from full)
     if short_env != target_env and short_patterns:
@@ -116,6 +151,10 @@ def replace_env(
     # Pass 2 — full env name for all remaining 'prod' tokens
     content, n = PROD_RE.subn(lambda m: target_env, content)
     total += n
+
+    # --- Step 3: restore heredoc blocks ---
+    for key, val in _store.items():
+        content = content.replace(key, val)
 
     return content, total
 
