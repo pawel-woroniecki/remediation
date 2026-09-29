@@ -163,8 +163,18 @@ def table_hcl(project: str, table: bigquery.Table) -> str:
     if table.description:
         lines.append(f'  description = "{hcl_str(table.description)}"')
 
-    # Schema — regular tables and external tables only; views have no stored schema
-    if ttype in ("TABLE", "EXTERNAL") and table.schema:
+    # Schema — regular/external tables always; materialized views only when they
+    # use field-based partitioning (BigQuery requires the schema upfront so it
+    # can validate the partition column before the view is materialized).
+    _mv_needs_schema = (
+        ttype == "MATERIALIZED_VIEW"
+        and table.schema
+        and (
+            (table.time_partitioning and table.time_partitioning.field)
+            or table.range_partitioning
+        )
+    )
+    if (ttype in ("TABLE", "EXTERNAL") or _mv_needs_schema) and table.schema:
         schema_json = json.dumps(_schema_to_json(table.schema), indent=4)
         lines += ["", "  schema = <<SCHEMA_EOF", schema_json, "SCHEMA_EOF"]
 
