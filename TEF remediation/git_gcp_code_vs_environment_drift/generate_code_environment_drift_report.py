@@ -475,7 +475,9 @@ def extract_columns_from_create_table(sql: str, target_name: str | None = None) 
                 continue
             column_match = re.match(r"`?(?P<name>[\w\-]+)`?\s+(?P<dtype>[A-Z0-9_<>,]+)", line, flags=re.IGNORECASE)
             if column_match:
-                columns[column_match.group("name")] = column_match.group("dtype").upper()
+                # rstrip(",") handles "col TYPE, -- inline comment" where the comma is
+                # not the last char so the line-level rstrip above didn't remove it.
+                columns[column_match.group("name")] = column_match.group("dtype").rstrip(",").upper()
     return columns
 
 
