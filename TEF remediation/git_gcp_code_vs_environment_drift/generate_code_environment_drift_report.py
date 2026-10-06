@@ -834,10 +834,10 @@ def build_source_dbt_inventory(snapshot_dir: Path) -> dict[str, dict[str, Any]]:
         content = sql_file.read_text(encoding="utf-8", errors="replace")
         stem_lower = sql_file.stem.lower()
         materialized = extract_materialization(content)
-        # Skip tmp_* models unless they explicitly declare materialized='table'.
-        # Without an explicit 'table' declaration, project-level dbt_project.yml
-        # overrides may make them ephemeral at runtime.
-        if stem_lower.startswith("tmp_") and materialized != "table":
+        # Skip tmp_* models unconditionally — these are intermediate/transient
+        # models that should never be expected as permanent BigQuery objects,
+        # regardless of their materialization setting.
+        if stem_lower.startswith("tmp_"):
             continue
         # A real dbt model always contains Jinja syntax ({{ config(, {{ ref(, {{ source(,
         # or {%...%} control blocks).  Files without any Jinja are plain SQL scripts that
