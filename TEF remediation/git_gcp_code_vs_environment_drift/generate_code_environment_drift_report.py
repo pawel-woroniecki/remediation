@@ -1201,6 +1201,10 @@ def compare_gcs(source_files: dict[str, dict[str, Any]], gcs_files: dict[str, di
                 }
             )
         elif deployed and not source:
+            # tmp_ prefixed dbt models are transient — skip them on the GCS side
+            # for the same reason they are skipped in the BQ source inventory.
+            if Path(path).stem.lower().startswith("tmp_"):
+                continue
             findings.append(
                 {
                     "area": "gcs",
@@ -1276,6 +1280,11 @@ def compare_bigquery(
 
     for object_name in sorted((actual_names - expected_names) - renamed_away_names):
         if object_name.lower().startswith("merge_"):
+            continue
+        # tmp_ prefixed tables are transient — created and dropped within a single
+        # run (e.g. dbt intermediate models). Skip them to avoid spurious only_in_bq
+        # findings when a tmp_ table was left behind in GCP.
+        if object_name.lower().startswith("tmp_"):
             continue
         actual = actual_bq_by_name[object_name][0]
         findings.append(
