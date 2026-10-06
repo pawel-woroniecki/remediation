@@ -473,6 +473,12 @@ def extract_columns_from_create_table(sql: str, target_name: str | None = None) 
             # as a column named PRIMARY/FOREIGN/UNIQUE/CHECK with type KEY/KEY/…
             if re.match(r"(primary|foreign)\s+key\b|(unique|check)\s*\(", line, re.IGNORECASE):
                 continue
+            # Skip DDL table-level clauses that can appear inside the column body
+            # when the closing ) is not on its own line: PARTITION BY, CLUSTER BY,
+            # ORDER BY.  Without this, the keyword itself is parsed as a column
+            # name with type "BY" and appears as a false missing_in_prod finding.
+            if re.match(r"(partition|cluster|order)\s+by\b", line, re.IGNORECASE):
+                continue
             column_match = re.match(r"`?(?P<name>[\w\-]+)`?\s+(?P<dtype>[A-Z0-9_<>,]+)", line, flags=re.IGNORECASE)
             if column_match:
                 # rstrip(",") handles "col TYPE, -- inline comment" where the comma is
