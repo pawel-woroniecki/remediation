@@ -11,6 +11,7 @@ dev-gke environments, for the most recent run or any historical snapshot.
 | Column | Description |
 |---|---|
 | `dataset_id` | BigQuery dataset name |
+| `repository` | GitLab repository that owns the dataset (NULL for datasets with no code owner) |
 | `table_id` | BigQuery table name |
 | `table_type` | `TABLE`, `VIEW`, `MATERIALIZED_VIEW`, or `EXTERNAL` |
 | `discrepancy` | `MISSING` — table absent from one or more lower envs; `DIFF` — table present everywhere but settings differ |
@@ -75,7 +76,7 @@ dev-gke environments, for the most recent run or any historical snapshot.
    | `run_number` | **Number**, Aggregation: **None** — used by the Run number dropdown filter |
    | `checked_at` | **Date & Time** |
 
-3. The remaining fields (`dataset_id`, `table_id`, `table_type`, `discrepancy`,
+3. The remaining fields (`dataset_id`, `repository`, `table_id`, `table_type`, `discrepancy`,
    `attribute`, `prod_value`, `test_value`, `dev_gke_value`) should already be
    **Text** dimensions — confirm and leave unchanged.
 4. Click **Done → Close**.
@@ -146,7 +147,7 @@ Three scorecard tiles at the top give a single-number total for the selected fil
 
 1. **Insert → Table**.
 2. In the **Setup** panel:
-   - **Dimensions:** `dataset_id`, `table_id`, `table_type`, `discrepancy`, `attribute`,
+   - **Dimensions:** `dataset_id`, `repository`, `table_id`, `table_type`, `discrepancy`, `attribute`,
      `prod_value`, `test_value`, `dev_gke_value`
    - Remove any auto-added metrics.
    - **Sort:** `discrepancy` ascending (DIFF before MISSING), then `dataset_id` ascending.
@@ -215,12 +216,12 @@ the **Step 0 — One-time GCP setup for Service Account Credentials** instructio
 
 ## What the finished dashboard looks like
 
-| dataset_id | table_id | table_type | discrepancy | attribute | prod_value | test_value | dev_gke_value |
-|---|---|---|---|---|---|---|---|
-| pl_energy | classic_meter | TABLE | DIFF | tp_type | DAY | DAY | `<none>` |
-| pl_energy | classic_meter | TABLE | DIFF | clustering | date,meter_id | date,meter_id | `<none>` |
-| pl_weather | weather_site_station_mapping | TABLE | MISSING | exists | EXISTS | EXISTS | ABSENT |
-| weather_site | hourly_readings | TABLE | DIFF | tp_field | reading_date | reading_date | `<none>` |
+| dataset_id | repository | table_id | table_type | discrepancy | attribute | prod_value | test_value | dev_gke_value |
+|---|---|---|---|---|---|---|---|---|
+| pl_energy | repo-pl-energy | classic_meter | TABLE | DIFF | tp_type | DAY | DAY | `<none>` |
+| pl_energy | repo-pl-energy | classic_meter | TABLE | DIFF | clustering | date,meter_id | date,meter_id | `<none>` |
+| pl_weather | repo-pl-weather | weather_site_station_mapping | TABLE | MISSING | exists | EXISTS | EXISTS | ABSENT |
+| weather_site | NULL | hourly_readings | TABLE | DIFF | tp_field | reading_date | reading_date | `<none>` |
 
 `<none>` means the table exists but has no partitioning or clustering of that type.
 `ABSENT` means the table does not exist in that environment.
@@ -238,6 +239,7 @@ the **Step 0 — One-time GCP setup for Service Account Credentials** instructio
 | `run_number` | Number | 1 = latest run for that dataset/table/attribute on that date, 2 = previous run |
 | `checked_at` | Date & Time | Exact UTC timestamp when the script ran |
 | `dataset_id` | Dimension | BigQuery dataset name |
+| `repository` | Dimension | GitLab repository that owns the dataset (NULL if unmapped) |
 | `table_id` | Dimension | BigQuery table name |
 | `table_type` | Dimension | `TABLE`, `VIEW`, `MATERIALIZED_VIEW`, or `EXTERNAL` |
 | `discrepancy` | Dimension | `MISSING` or `DIFF` |

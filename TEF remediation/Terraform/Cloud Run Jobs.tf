@@ -510,6 +510,27 @@ resource "google_cloud_run_v2_job" "bq_structure" {
           "--envs",              "prod,test,dev-gke",
         ]
 
+        env {
+          name  = "GCP_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "GITLAB_BASE_URL"
+          value = var.gitlab_base_url
+        }
+        env {
+          name  = "GITLAB_TOKEN_SECRET_ID"
+          value = var.gitlab_token_secret_id
+        }
+        env {
+          name  = "SUBGROUP"
+          value = var.gitlab_subgroup
+        }
+        env {
+          name  = "REPORTS_GCS_BUCKET"
+          value = var.reports_gcs_bucket
+        }
+
         resources {
           limits = {
             memory = local.job_memory

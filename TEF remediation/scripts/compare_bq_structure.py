@@ -39,6 +39,7 @@ Options:
 
 import argparse
 import csv
+import json
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field as dc_field
@@ -176,6 +177,7 @@ def compare(
     envs: list[str],
     env_data: dict[str, dict[tuple[str, str], TableMeta]],
     prod_env: str,
+    repo_mapping: dict | None = None,
 ) -> list[dict]:
     """Return list of discrepancy row dicts ready for BQ insert / CSV."""
     prod_tables = env_data.get(prod_env, {})
@@ -199,7 +201,7 @@ def compare(
         any_present = any(m.exists for m in metas.values())
         all_present = all(m.exists for m in metas.values())
         if any_present and not all_present:
-            row = _base_row(ds_id, t_id, table_type, "MISSING", "exists")
+            row = _base_row(ds_id, t_id, table_type, "MISSING", "exists", repo_mapping)
             for e in envs:
                 _col(row, e, "EXISTS" if metas[e].exists else "ABSENT")
             rows.append(row)
@@ -213,7 +215,7 @@ def compare(
             values = {e: metas[e].attr(attr) for e in envs}
             unique_vals = set(values.values())
             if len(unique_vals) > 1:
-                row = _base_row(ds_id, t_id, table_type, "DIFF", attr)
+                row = _base_row(ds_id, t_id, table_type, "DIFF", attr, repo_mapping)
                 for e in envs:
                     _col(row, e, values[e])
                 rows.append(row)
@@ -221,9 +223,11 @@ def compare(
     return rows
 
 
-def _base_row(ds_id, t_id, table_type, discrepancy, attribute) -> dict:
+def _base_row(ds_id, t_id, table_type, discrepancy, attribute,
+              repo_mapping: dict | None = None) -> dict:
     return {
         "dataset_id":   ds_id,
+        "repository":   (repo_mapping or {}).get(ds_id),
         "table_id":     t_id,
         "table_type":   table_type,
         "discrepancy":  discrepancy,
@@ -241,10 +245,10 @@ def _col(row: dict, env: str, value: str) -> None:
 # ---------------------------------------------------------------------------
 
 BQ_COLUMNS = [
-    "run_id", "checked_at", "dataset_id", "table_id", "table_type",
+    "run_id", "checked_at", "dataset_id", "repository", "table_id", "table_type",
     "discrepancy", "attribute",
 ]
-CSV_COLUMNS = ["dataset_id", "table_id", "table_type", "discrepancy", "attribute"]
+CSV_COLUMNS = ["dataset_id", "repository", "table_id", "table_type", "discrepancy", "attribute"]
 
 
 def write_bq(
@@ -267,6 +271,7 @@ def write_bq(
             "run_id":     run_id,
             "checked_at": checked_at.isoformat(),
             "dataset_id": r["dataset_id"],
+            "repository": r.get("repository"),
             "table_id":   r["table_id"],
             "table_type": r.get("table_type", ""),
             "discrepancy":r["discrepancy"],
@@ -353,6 +358,12 @@ def main() -> None:
         "--workers", type=int, default=3,
         help="Thread-pool size for parallel env fetching (default: 3)",
     )
+    parser.add_argument(
+        "--mapping-file", default=None, metavar="PATH",
+        help="Path to a JSON file mapping dataset_id → repository name "
+             "(produced by generate_dataset_mapping.py --local-output). "
+             "When provided, populates the 'repository' column in every output row.",
+    )
     args = parser.parse_args()
 
     envs = [e.strip() for e in args.envs.split(",") if e.strip()]
@@ -365,6 +376,16 @@ def main() -> None:
     only_datasets = args.datasets or []
     checked_at    = datetime.now(timezone.utc)
     run_id        = checked_at.strftime("%Y%m%dT%H%M%SZ")
+
+    repo_mapping: dict | None = None
+    if args.mapping_file:
+        mapping_path = Path(args.mapping_file)
+        if mapping_path.exists():
+            repo_mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+            print(f"Repo mapping loaded    : {len(repo_mapping)} dataset(s) from {mapping_path}")
+        else:
+            print(f"WARNING: --mapping-file {mapping_path} not found; repository will be NULL",
+                  file=sys.stderr)
 
     print(f"Comparing environments : {', '.join(envs)}")
     print(f"Reference env (prod)   : {prod_env} → {ENV_TO_PROJECT[prod_env]}")
@@ -390,7 +411,7 @@ def main() -> None:
                 env_data[e] = {}
 
     # Compare
-    rows = compare(envs, env_data, prod_env)
+    rows = compare(envs, env_data, prod_env, repo_mapping)
     print_summary(rows, envs)
 
     if not rows:

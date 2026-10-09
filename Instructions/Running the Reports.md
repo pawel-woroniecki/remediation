@@ -36,7 +36,6 @@ All 6 Cloud Run Jobs run **automatically every day** — no action needed for ro
 | `devops-reports-bq-structure` | `devops-reports-bq-structure-trigger` | 06:00 |
 
 Times are staggered 10 minutes apart so the jobs don't all clone the same repos at once.
-(`devops-reports-bq-structure` does not clone repos but follows the same stagger convention.)
 
 ### How it works
 

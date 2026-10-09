@@ -94,18 +94,35 @@ def main() -> None:
                         help="Root directory of cloned repos (default: /workspace/repos/fastossb)")
     parser.add_argument("--subgroup", default="ndl_core",
                         help="Subgroup folder inside workspace-root (default: ndl_core)")
-    parser.add_argument("--gcs-output", required=True,
+    parser.add_argument("--gcs-output",
                         help="GCS URI to write the JSON mapping, "
                              "e.g. gs://my-bucket/dataset-mapping/dataset_repo_map.json")
+    parser.add_argument("--local-output",
+                        help="Local file path to write the JSON mapping, "
+                             "e.g. /tmp/dataset_repo_map.json")
     args = parser.parse_args()
+
+    if not args.gcs_output and not args.local_output:
+        parser.error("At least one of --gcs-output or --local-output is required")
 
     workspace_root = Path(args.workspace_root)
     log("INFO", "Starting dataset mapping generation",
         workspace_root=str(workspace_root), subgroup=args.subgroup,
-        gcs_output=args.gcs_output)
+        gcs_output=args.gcs_output or "(none)",
+        local_output=args.local_output or "(none)")
 
     dataset_repo_map = build_dataset_repo_map(workspace_root, args.subgroup)
-    write_to_gcs(dataset_repo_map, args.gcs_output)
+
+    if args.gcs_output:
+        write_to_gcs(dataset_repo_map, args.gcs_output)
+
+    if args.local_output:
+        local_path = Path(args.local_output)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text(json.dumps(dataset_repo_map, indent=2), encoding="utf-8")
+        log("INFO", "Dataset mapping written to local file", path=str(local_path),
+            dataset_count=len(dataset_repo_map))
+
     log("INFO", "Dataset mapping job completed successfully")
 
 

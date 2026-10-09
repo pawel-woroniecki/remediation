@@ -159,9 +159,7 @@ The `env_drift` jobs use 4 GiB / 2 CPU (more headroom for parallel repo processi
 All other jobs use 2 GiB / 1 CPU.
 
 All jobs route egress through the Shared VPC (`ALL_TRAFFIC` egress via the VPC
-Access Connector) so they can reach the private GitLab instance. The `bq_structure`
-job does not need GitLab access but uses the same VPC connector for org network
-policy compliance.
+Access Connector) so they can reach the private GitLab instance.
 
 To rebuild the Docker image and update all jobs, push a new image tag and update
 `container_image` in `terraform.tfvars`, then run `terraform apply`.

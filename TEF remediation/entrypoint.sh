@@ -278,7 +278,25 @@ PYEOF
         ;;
 
     bq_structure)
+        WORKSPACE_ROOT="${REPO_ROOT:-/workspace/repos/fastossb}"
+        SUBGROUP="${SUBGROUP:-ndl_core}"
+        GITLAB_BASE_URL="${GITLAB_BASE_URL:-https://dot-portal.de.pri.o2.com/gitlab}"
+        MAPPING_FILE="/tmp/dataset_repo_map.json"
+
+        clone_repos "$WORKSPACE_ROOT" "$GITLAB_BASE_URL"
+
+        _mapping_args=(
+            --workspace-root "$WORKSPACE_ROOT"
+            --subgroup       "$SUBGROUP"
+            --local-output   "$MAPPING_FILE"
+        )
+        if [[ -n "${REPORTS_GCS_BUCKET:-}" ]]; then
+            _mapping_args+=(--gcs-output "gs://${REPORTS_GCS_BUCKET}/dataset-mapping/dataset_repo_map.json")
+        fi
+        python3 "$SCRIPTS_DIR/generate_dataset_mapping.py" "${_mapping_args[@]}"
+
         exec python3 "$SCRIPTS_DIR/compare_bq_structure.py" \
+            --mapping-file "$MAPPING_FILE" \
             "$@"
         ;;
 
