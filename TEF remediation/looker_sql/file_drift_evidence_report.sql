@@ -13,7 +13,9 @@
  * Usage   : Connect Looker Studio directly to the file_drift_evidence_report
  *           BQ view.  Add Filter Controls on run_date (dropdown) and
  *           drift_direction (dropdown) to narrow the view.
- *           "Enable date range parameters" must be CHECKED on this data source.
+ *           Set run_date as the "Date range dimension" on each chart and add a
+ *           Date Range Control to the page. Do NOT check "Enable date range
+ *           parameters" — that option is only available in Custom Query mode.
  *
  * Suggested dashboard tiles:
  *   - Main table  : repo / drift_direction / file_path / change_label /
@@ -37,7 +39,7 @@ WITH latest_exec AS (
   FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'file_drift'
     AND status      = 'success'
-    AND DATE(execution_ts, 'Europe/Berlin') BETWEEN @DS_START_DATE AND @DS_END_DATE
+    AND status      = 'success'
 )
 
 SELECT

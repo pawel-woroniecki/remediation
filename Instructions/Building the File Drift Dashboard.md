@@ -42,9 +42,7 @@ for the run date selected by the user.
 2. Click **Create → Report**.
 3. In the data source picker choose **BigQuery → My Projects**.
 4. Select **`tefde-gcp-fastoss-dev` → `devops_reports` → `file_drift_report`**.
-5. **Check "Enable date range parameters".** The view uses `@DS_START_DATE` and
-   `@DS_END_DATE` so Looker Studio can push the chosen date range into the query.
-   Leaving it unchecked will cause a parameter error.
+5. Leave all options at their defaults and click **Connect**.
 6. Name the data source `File Drift`.
 7. Click **Add** (top right) → **Add to Report**.
 
@@ -89,6 +87,7 @@ for the run date selected by the user.
    - **Metrics:** `unique_files`, `files_added`, `files_modified`, `files_deleted`
    - **Sort:** `unique_files` descending (most-drifted repos appear first).
    - **Rows per page:** `50`.
+   - **Date range dimension:** `run_date` — this connects the chart to the Date Range Control.
 
 > `repo` and `drift_direction` together identify one row. A repository compared across
 > multiple branch pairs will appear as one row per pair.
@@ -115,17 +114,18 @@ Insert these controls above the table and bar chart:
 ### Filter 0 — Date range
 
 1. **Insert → Date range control**.
-2. This drives `@DS_START_DATE`/`@DS_END_DATE` into the view query — only runs within
-   the chosen period are returned. Set a default such as **Last 30 days**.
+2. Set a default such as **Last 30 days**.
+3. This control works via the **Date range dimension** set on each chart (`run_date`).
+   Looker Studio automatically filters the query to the chosen period — no special
+   data source setting is needed.
 
 ### Filter 1 — Run date
 
 1. **Insert → Filter control**.
 2. Field: `run_date`. Control type: **Drop-down list**. Label: `Run date`.
-3. The dropdown lists every date on which a successful file drift run was recorded
-   within the date range selected above. Selecting one date shows the snapshot from
-   that run.
-4. Leaving the filter empty shows all runs within the selected date range combined.
+3. The dropdown lists every date within the Date Range Control window on which a
+   successful run was recorded. Selecting one date shows the snapshot from that run.
+4. Leaving the filter empty shows all runs within the selected period combined.
 
 ### Filter 2 — Run number
 

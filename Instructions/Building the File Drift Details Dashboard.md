@@ -40,15 +40,14 @@ KPI counts) by drilling down to the individual file level.
 2. Click **Create → Report**.
 3. In the data source picker choose **BigQuery → My Projects**.
 4. Select **`tefde-gcp-fastoss-dev` → `devops_reports` → `file_drift_evidence_report`**.
-5. **Check "Enable date range parameters".** The view uses `@DS_START_DATE` and
-   `@DS_END_DATE` parameters so Looker Studio can push the chosen date range into
-   the query. Leaving it unchecked will cause a parameter error.
+5. Leave all options at their defaults and click **Connect**.
 6. Name the data source `File Drift Details`.
 7. Click **Add** (top right) → **Add to Report**.
 
-> The `file_drift_evidence_report` view uses `@DS_START_DATE`/`@DS_END_DATE` —
-> it requires "Enable date range parameters" to be checked or it will fail with
-> a parameter error when Looker Studio queries it.
+> Date filtering is handled by setting **Date range dimension** to `run_date` on each
+> chart and adding a **Date Range Control** to the page (see Step 5). The "Enable date
+> range parameters" option is not available for direct view connections — it only appears
+> in Custom Query mode.
 >
 > The view is defined in `TEF remediation/Terraform/BQ DS + Tables.tf`.
 > The SQL reference file is `TEF remediation/looker_sql/file_drift_evidence_report.sql`.
@@ -84,6 +83,7 @@ KPI counts) by drilling down to the individual file level.
    - **Metrics:** `last_changed_at` (set aggregation to **None** or **Max**)
    - **Sort:** `repo` ascending, then `drift_direction`, then `file_path` ascending.
    - **Rows per page:** `100`.
+   - **Date range dimension:** `run_date` — connects this table to the Date Range Control.
 
 > Each row is one drifting file.  For `integration_layer` + `production differs from test`
 > you will see 50 rows — one per file that differs.
@@ -111,18 +111,16 @@ Insert these controls above the table and bar chart.
 ### Filter 0 — Date range
 
 1. **Insert → Date range control**.
-2. This is the primary time filter — it drives `@DS_START_DATE` and `@DS_END_DATE`
-   into the view query, so only runs within the chosen range are returned.
-3. Set a default range such as **Last 30 days**.
+2. Set a default range such as **Last 30 days**.
+3. This control works via the **Date range dimension** (`run_date`) set on each chart.
+   Looker Studio automatically filters the query to the chosen period.
 
 ### Filter 1 — Run date
 
 1. **Insert → Filter control**.
 2. Field: `run_date`. Control type: **Drop-down list**. Label: `Run date`.
-3. Select a specific date to see the snapshot from that run.
-
-> **"Enable date range parameters" must be CHECKED** on the `File Drift Details`
-> data source — the view uses `@DS_START_DATE`/`@DS_END_DATE` parameters.
+3. The dropdown lists every date within the Date Range Control window on which a
+   successful run was recorded. Select a specific date to see the snapshot from that run.
 
 ### Filter 2 — Run number
 

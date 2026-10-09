@@ -39,9 +39,7 @@ dates of those commits, for the most recent successful run.
 2. Click **Create → Report**.
 3. In the data source picker choose **BigQuery → My Projects**.
 4. Select **`tefde-gcp-fastoss-dev` → `devops_reports` → `commit_drift_report`**.
-5. **Check "Enable date range parameters".** The view uses `@DS_START_DATE` and
-   `@DS_END_DATE` so Looker Studio can push the chosen date range into the query.
-   Leaving it unchecked will cause a parameter error.
+5. Leave all options at their defaults and click **Connect**.
 6. Name the data source `Commit Drift`.
 7. Click **Add** (top right) → **Add to Report**.
 
@@ -82,7 +80,7 @@ dates of those commits, for the most recent successful run.
    - **Metrics:** `unique_commits`, `unique_files`, `distinct_authors`
    - **Sort:** `unique_commits` descending (most-drifted repos appear first).
    - **Rows per page:** `50`.
-3. **Date range dimension:** scroll down in Setup and set it to `execution_ts`.
+3. **Date range dimension:** scroll down in Setup and set it to `run_date` — this connects the chart to the Date Range Control.
 
 > `repo` and `drift_direction` together identify one row. A repository with three branch pairs
 > being compared will appear as three rows, one per pair.
@@ -135,18 +133,19 @@ Insert these five controls above the table and pivot table:
 ### Filter 0 — Date range
 
 1. **Insert → Date range control**.
-2. This drives `@DS_START_DATE`/`@DS_END_DATE` into the view query — only runs within
-   the chosen period are returned. Set a default such as **Last 30 days**.
+2. Set a default such as **Last 30 days**.
+3. This control works via the **Date range dimension** set on each chart (`run_date`).
+   Looker Studio automatically filters the query to the chosen period — no special
+   data source setting is needed.
 
 ### Filter 1 — Run date
 
 1. **Insert → Filter control**.
 2. Field: `run_date`. Control type: **Drop-down list**. Label: `Run date`.
-3. The dropdown lists every date on which a successful commit drift run was recorded
-   within the date range selected above. Selecting one date shows the snapshot from
-   that run.
-4. Leaving the filter empty (no selection) shows all runs within the selected date range
-   combined — useful to see which repos appear across multiple runs.
+3. The dropdown lists every date within the Date Range Control window on which a
+   successful run was recorded. Selecting one date shows the snapshot from that run.
+4. Leaving the filter empty (no selection) shows all runs within the selected period
+   combined.
 
 > **Single-date behavior:** Because the view returns one result row per repo × direction
 > × run, picking a single date in this dropdown is equivalent to "show me the state
@@ -299,9 +298,9 @@ detail behind the pivot table counts.
 3. Click **Add** → **Add to Report**.
 4. Name the data source `Commit Evidence`.
 
-> **"Enable date range parameters"** must be **checked** — the view uses
-> `@DS_START_DATE`/`@DS_END_DATE`. The page-level Date Range Control (added in
-> Step 6 Filter 0) automatically applies to this data source too.
+> Leave all options at their defaults and click **Connect**. The page-level Date
+> Range Control applies to this table automatically once you set **Date range
+> dimension** to `run_date` in the evidence table's Setup panel (see below).
 
 ### Set field types
 
@@ -322,9 +321,9 @@ detail behind the pivot table counts.
 1. **Insert → Table** (use this data source: `Commit Evidence`).
 2. Set all columns as **Dimensions**:
    - `repo`, `drift_direction`, `commit_sha`, `author`, `commit_date`, `file_path`
-3. **Sort:** `commit_date` descending.
-4. **Rows per page:** 50.
-5. **Do NOT set a Date range dimension** — the `run_date` filter control handles date selection.
+3. **Date range dimension:** `run_date` — connects this table to the page-level Date Range Control.
+4. **Sort:** `commit_date` descending.
+5. **Rows per page:** 50.
 
 ### Add filter controls for the evidence table
 

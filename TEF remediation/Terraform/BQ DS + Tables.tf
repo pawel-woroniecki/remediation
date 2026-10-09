@@ -733,7 +733,6 @@ resource "google_bigquery_table" "commit_drift_report" {
         FROM `${var.reporting_project_id}.devops_reports.executions`
         WHERE report_type = 'commit_drift'
           AND status      = 'success'
-          AND DATE(execution_ts, 'Europe/Berlin') BETWEEN @DS_START_DATE AND @DS_END_DATE
       ),
 
       kpi_summary AS (
@@ -850,7 +849,6 @@ resource "google_bigquery_table" "commit_drift_evidence_report" {
         FROM `${var.reporting_project_id}.devops_reports.executions`
         WHERE report_type = 'commit_drift'
           AND status      = 'success'
-          AND DATE(execution_ts, 'Europe/Berlin') BETWEEN @DS_START_DATE AND @DS_END_DATE
       ),
       kpi AS (
         SELECT
@@ -934,7 +932,6 @@ resource "google_bigquery_table" "file_drift_report" {
         FROM `${var.reporting_project_id}.devops_reports.executions`
         WHERE report_type = 'file_drift'
           AND status      = 'success'
-          AND DATE(execution_ts, 'Europe/Berlin') BETWEEN @DS_START_DATE AND @DS_END_DATE
       ),
 
       kpi_summary AS (
@@ -1052,7 +1049,6 @@ resource "google_bigquery_table" "file_drift_evidence_report" {
         FROM `${var.reporting_project_id}.devops_reports.executions`
         WHERE report_type = 'file_drift'
           AND status      = 'success'
-          AND DATE(execution_ts, 'Europe/Berlin') BETWEEN @DS_START_DATE AND @DS_END_DATE
       )
 
       SELECT
