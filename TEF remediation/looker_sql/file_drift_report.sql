@@ -35,7 +35,7 @@ WITH latest_exec AS (
   FROM `tefde-gcp-fastoss-dev.devops_reports.executions`
   WHERE report_type = 'file_drift'
     AND status      = 'success'
-    AND execution_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
+    AND DATE(execution_ts, 'Europe/Berlin') BETWEEN @DS_START_DATE AND @DS_END_DATE
 ),
 
 kpi_summary AS (
