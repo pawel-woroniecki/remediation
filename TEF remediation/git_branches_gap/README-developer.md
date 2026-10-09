@@ -1,7 +1,19 @@
-# Developer Guide — `report_branch_discrepancies_by_content.py`
+# Developer Guide — Branch Drift Scripts
 
-This document explains the internal design of the file-content branch drift script
-for developers who need to maintain, extend, or debug it.
+This document covers the internal design of both branch drift Python scripts:
+
+- [`report_branch_discrepancies_by_content.py`](#file-content-drift-script) — compares file content between branches
+- [`report_branch_discrepancies_by_commit.py`](#commit-based-drift-script) — compares commit history between branches
+
+For operational use (parameters, examples, outputs) see [README.md](README.md).
+
+---
+
+# File-Content Drift Script
+
+## `report_branch_discrepancies_by_content.py`
+
+This script explains the internal design of the file-content branch drift script.
 For operational use (parameters, examples, outputs) see [README.md](README.md).
 
 ---
@@ -255,3 +267,128 @@ python report_branch_discrepancies_by_content.py \
 
 To avoid GCS and BQ writes entirely during local testing, you can temporarily
 comment out the `upload_to_gcs()` and `write_to_bigquery()` calls in `main()`.
+
+---
+
+# Commit-Based Drift Script
+
+## `report_branch_discrepancies_by_commit.py`
+
+## Purpose
+
+Identifies commits that exist on one branch but not on another across
+`master`, `test`, and `production`. Where the content script answers
+"which files look different?", this script answers "which commits caused
+the difference, and who made them?"
+
+The two scripts are complementary: content drift can exist without unique
+commits (squash merge, rebase) and unique commits can exist without
+visible content drift (a revert).
+
+---
+
+## High-Level Flow
+
+```
+for each repo:
+   for each of 6 branch-pair directions:
+      get_detail_rows()    ← git log --no-merges --right-only --cherry-pick
+                                      --name-only --pretty=format:@@@<meta>
+         │
+         └─ one row per repo × commit × file
+   │
+   ▼
+write_csv()              ← commit_counts, file_counts, details, totals
+upload_to_gcs()
+write_to_bigquery()      ← branch_drift_evidence, branch_drift_kpis, executions
+```
+
+---
+
+## `DISCREPANCY_DEFS`
+
+Same structure as the content script: 6 directions across the three branches.
+Note that the commit script uses abbreviated names (`prod_not_in_test` etc.)
+for the `name` field. This is intentional here because the `commit_drift_report.sql`
+view uses a different JOIN strategy that does not construct the key from branch
+names. If you extend the SQL view, verify the join keys match.
+
+---
+
+## `get_detail_rows(repo_path, repo_name, left, right, discrepancy_name, problem_statement)`
+
+The core function. Runs:
+
+```bash
+git log --no-merges --right-only --cherry-pick \
+        --name-only --pretty=format:@@@%H|%aI|%an|%ae|%s \
+        origin/left...origin/right
+```
+
+**What each git flag does:**
+
+| Flag | Effect |
+|---|---|
+| `--no-merges` | Excludes merge commits — only shows substantive changes |
+| `--right-only` | Shows only commits reachable from `right` but not `left` |
+| `--cherry-pick` | Further filters to commits whose patch ID does not exist on `left` — excludes cherry-picked duplicates |
+| `--name-only` | Appends the list of changed files after each commit header |
+| `--pretty=format:@@@<fields>` | Custom format: commit lines start with `@@@` so the parser can distinguish them from file path lines |
+
+**Output parsing** — the stdout mixes two line types:
+- `@@@<hash>|<iso_date>|<author>|<email>|<subject>` — commit header
+- `path/to/file.sql` — file changed by the current commit
+
+The parser maintains `current_hash` state: file lines are attributed to the
+most recently seen `@@@` commit header. Empty lines between commits are ignored.
+
+**Returns**: `(rows, unique_file_count, unique_commit_count)`
+- `rows`: one dict per commit × file (used for BQ evidence and CSV detail)
+- `unique_file_count`: count of distinct file paths across all commits in this direction
+- `unique_commit_count`: count of distinct commits that actually touch at least one file
+
+---
+
+## Severity Thresholds
+
+| Unique commits | Severity |
+|---|---|
+| 0 | `none` |
+| 1–5 | `low` |
+| 6–20 | `medium` |
+| > 20 | `high` |
+
+---
+
+## BigQuery Tables Written
+
+Same three tables as the content script, written in the same order (evidence → kpis → executions):
+
+| Table | Key difference vs content script |
+|---|---|
+| `branch_drift_evidence` | `drift_type = 'commit'`; `change_type = None` (no git diff codes); `commit_sha` and `author` are always populated |
+| `branch_drift_kpis` | `drift_type = 'commit'`; `comparison_mode = 'cherry_pick_no_merges'`; both `unique_commits` and `unique_files` are populated |
+| `executions` | `report_type = 'commit_drift'` |
+
+---
+
+## Idempotency and Error Handling
+
+Identical to the content script: `execution_id_exists()` guard before BQ writes;
+top-level `try/except` writes `status = "failed"` and re-raises.
+
+---
+
+## Local Development
+
+```bash
+export EXECUTION_ID=local-test-001
+export TRIGGERED_BY=developer
+
+python report_branch_discrepancies_by_commit.py \
+  --root /path/to/cloned-repos \
+  --gcp-project tefde-gcp-fastoss-dev \
+  --reporting-project tefde-gcp-fastoss-dev \
+  --gcs-bucket to-be-added-later \
+  --output-dir /tmp/commit-drift-test
+```
