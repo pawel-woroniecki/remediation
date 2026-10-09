@@ -39,9 +39,9 @@ dates of those commits, for the most recent successful run.
 2. Click **Create → Report**.
 3. In the data source picker choose **BigQuery → My Projects**.
 4. Select **`tefde-gcp-fastoss-dev` → `devops_reports` → `commit_drift_report`**.
-5. **Leave "Enable date range parameters" unchecked.** The view uses a fixed 90-day
-   lookback window and does not use `@DS_START_DATE`/`@DS_END_DATE` parameters. Checking
-   this box would cause an error.
+5. **Check "Enable date range parameters".** The view uses `@DS_START_DATE` and
+   `@DS_END_DATE` so Looker Studio can push the chosen date range into the query.
+   Leaving it unchecked will cause a parameter error.
 6. Name the data source `Commit Drift`.
 7. Click **Add** (top right) → **Add to Report**.
 
@@ -132,24 +132,26 @@ with ⚠ by the BQ view.
 
 Insert these five controls above the table and pivot table:
 
+### Filter 0 — Date range
+
+1. **Insert → Date range control**.
+2. This drives `@DS_START_DATE`/`@DS_END_DATE` into the view query — only runs within
+   the chosen period are returned. Set a default such as **Last 30 days**.
+
 ### Filter 1 — Run date
 
 1. **Insert → Filter control**.
 2. Field: `run_date`. Control type: **Drop-down list**. Label: `Run date`.
 3. The dropdown lists every date on which a successful commit drift run was recorded
-   (up to 90 days back). Selecting one date shows the snapshot from that run.
-4. Leaving the filter empty (no selection) shows all runs combined — useful to see
-   which repos appear across all recent runs, but not the normal usage.
+   within the date range selected above. Selecting one date shows the snapshot from
+   that run.
+4. Leaving the filter empty (no selection) shows all runs within the selected date range
+   combined — useful to see which repos appear across multiple runs.
 
 > **Single-date behavior:** Because the view returns one result row per repo × direction
 > × run, picking a single date in this dropdown is equivalent to "show me the state
-> as of this run." There is no date range picker — Looker Studio's built-in Date Range
-> control would always show two calendar pickers (start + end), which is misleading
-> for a per-snapshot report. The dropdown is the correct control here.
->
-> **"Enable date range parameters" must be UNCHECKED** on the `Commit Drift` data
-> source. The view uses a fixed 90-day lookback window — it does not use
-> `@DS_START_DATE`/`@DS_END_DATE` parameters.
+> as of this run." Use the Date Range Control to set the window, then this dropdown to
+> pick a specific date within it.
 
 ### Filter 2 — Run number
 
@@ -297,7 +299,9 @@ detail behind the pivot table counts.
 3. Click **Add** → **Add to Report**.
 4. Name the data source `Commit Evidence`.
 
-> **"Enable date range parameters"** must be **unchecked**.
+> **"Enable date range parameters"** must be **checked** — the view uses
+> `@DS_START_DATE`/`@DS_END_DATE`. The page-level Date Range Control (added in
+> Step 6 Filter 0) automatically applies to this data source too.
 
 ### Set field types
 

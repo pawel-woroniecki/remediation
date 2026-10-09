@@ -42,9 +42,9 @@ for the run date selected by the user.
 2. Click **Create → Report**.
 3. In the data source picker choose **BigQuery → My Projects**.
 4. Select **`tefde-gcp-fastoss-dev` → `devops_reports` → `file_drift_report`**.
-5. **Leave "Enable date range parameters" unchecked.** The view uses a fixed 90-day
-   lookback window and does not use `@DS_START_DATE`/`@DS_END_DATE` parameters. Checking
-   this box would cause an error.
+5. **Check "Enable date range parameters".** The view uses `@DS_START_DATE` and
+   `@DS_END_DATE` so Looker Studio can push the chosen date range into the query.
+   Leaving it unchecked will cause a parameter error.
 6. Name the data source `File Drift`.
 7. Click **Add** (top right) → **Add to Report**.
 
@@ -112,17 +112,20 @@ for the run date selected by the user.
 
 Insert these controls above the table and bar chart:
 
+### Filter 0 — Date range
+
+1. **Insert → Date range control**.
+2. This drives `@DS_START_DATE`/`@DS_END_DATE` into the view query — only runs within
+   the chosen period are returned. Set a default such as **Last 30 days**.
+
 ### Filter 1 — Run date
 
 1. **Insert → Filter control**.
 2. Field: `run_date`. Control type: **Drop-down list**. Label: `Run date`.
 3. The dropdown lists every date on which a successful file drift run was recorded
-   (up to 90 days back). Selecting one date shows the snapshot from that run.
-4. Leaving the filter empty shows all runs combined.
-
-> **"Enable date range parameters" must be UNCHECKED** on the `File Drift` data source.
-> The view uses a fixed 90-day lookback window — it does not use Looker Studio date
-> parameters.
+   within the date range selected above. Selecting one date shows the snapshot from
+   that run.
+4. Leaving the filter empty shows all runs within the selected date range combined.
 
 ### Filter 2 — Run number
 
