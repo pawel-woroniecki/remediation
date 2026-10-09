@@ -133,6 +133,7 @@ The largest file. Creates and manages everything in BigQuery:
 | `file_drift_report` | `file_drift_report` | File-content branch drift KPIs |
 | `file_drift_evidence_report` | `file_drift_evidence_report` | File-level drill-through (remediation) |
 | `bq_structure_drift_report` | `bq_structure_drift_report` | BQ schema drift across environments |
+| `management_dashboard` | `management_dashboard` | Cross-report summary for managers: one row per repo × date showing BQ findings, GCS findings, commit red flags, and file drift (critical directions only — production not in master/test, test not in master). Always shows the latest run of each report type for the selected date. |
 
 > When updating a view's SQL, edit the `query` heredoc inside the corresponding
 > `google_bigquery_table` resource and run `terraform apply`. The view is updated
