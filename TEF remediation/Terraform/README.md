@@ -153,12 +153,15 @@ argument to `entrypoint.sh` to select the report type.
 | `devops-reports-env-drift-dev` | Environment vs code drift (dev) | 05:50 |
 | `devops-reports-commit-drift` | Commit-based branch drift | 05:20 |
 | `devops-reports-file-drift` | File-content branch drift | 05:30 |
+| `devops-reports-bq-structure` | BQ table structure drift across environments | 06:00 |
 
 The `env_drift` jobs use 4 GiB / 2 CPU (more headroom for parallel repo processing).
 All other jobs use 2 GiB / 1 CPU.
 
 All jobs route egress through the Shared VPC (`ALL_TRAFFIC` egress via the VPC
-Access Connector) so they can reach the private GitLab instance.
+Access Connector) so they can reach the private GitLab instance. The `bq_structure`
+job does not need GitLab access but uses the same VPC connector for org network
+policy compliance.
 
 To rebuild the Docker image and update all jobs, push a new image tag and update
 `container_image` in `terraform.tfvars`, then run `terraform apply`.
@@ -168,7 +171,7 @@ Creates seven Cloud Scheduler jobs that trigger the Cloud Run Jobs daily via the
 Cloud Run Admin API (`POST .../jobs/{job}:run`). Authentication uses `oauth_token`
 (not OIDC) because the target is a Google API endpoint.
 
-Schedules are staggered by 10 minutes from 05:00 to 05:50 CET to avoid
+Schedules are staggered by 10 minutes from 05:00 to 06:00 CET to avoid
 simultaneous clone load on the GitLab server.
 
 ### `looker.tf`

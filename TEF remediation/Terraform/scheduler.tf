@@ -17,6 +17,7 @@ locals {
   schedule_file_drift      = "30 5 * * *" # 05:30 — staggered 10 min apart to avoid simultaneous clone load
   schedule_env_drift_test  = "40 5 * * *" # 05:40
   schedule_env_drift_dev   = "50 5 * * *" # 05:50
+  schedule_bq_structure    = "0 6 * * *"  # 06:00
 }
 
 data "google_project" "this" {
@@ -186,6 +187,33 @@ resource "google_cloud_scheduler_job" "env_drift_dev" {
 }
 
 # ---------------------------------------------------------------------------
+# Job 7: BQ Structure Drift
+# ---------------------------------------------------------------------------
+resource "google_cloud_scheduler_job" "bq_structure" {
+  name      = "devops-reports-bq-structure-trigger"
+  project   = var.project_id
+  region    = var.region
+  schedule  = local.schedule_bq_structure
+  time_zone = local.scheduler_time_zone
+
+  depends_on = [google_project_service.cloudscheduler]
+
+  http_target {
+    uri         = "https://run.googleapis.com/v2/${google_cloud_run_v2_job.bq_structure.id}:run"
+    http_method = "POST"
+    body        = base64encode("{}")
+
+    oauth_token {
+      service_account_email = var.cloud_run_sa_email
+    }
+  }
+
+  retry_config {
+    retry_count = 1
+  }
+}
+
+# ---------------------------------------------------------------------------
 # IAM — allow the Cloud Scheduler service agent to mint OAuth tokens as the
 # runner SA. Without this, every scheduled invocation fails with a 403 at
 # firing time (not at terraform apply time).
@@ -211,6 +239,7 @@ output "scheduler_jobs" {
     env_drift_dev   = google_cloud_scheduler_job.env_drift_dev.name
     commit_drift    = google_cloud_scheduler_job.commit_drift.name
     file_drift      = google_cloud_scheduler_job.file_drift.name
+    bq_structure    = google_cloud_scheduler_job.bq_structure.name
   }
   description = "Names of the Cloud Scheduler jobs that trigger each report daily."
 }

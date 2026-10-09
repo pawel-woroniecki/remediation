@@ -21,7 +21,7 @@ fi
 REPORT_TYPE="${1:-}"
 if [[ -z "$REPORT_TYPE" ]]; then
     log_json "ERROR" "Usage: run-report <report_type> [args...]"
-    log_json "ERROR" "Valid report types: orphan_datasets, env_drift, commit_drift, file_drift, dataset_mapping"
+    log_json "ERROR" "Valid report types: orphan_datasets, env_drift, commit_drift, file_drift, dataset_mapping, bq_structure"
     exit 1
 fi
 shift
@@ -277,8 +277,13 @@ PYEOF
             "$@"
         ;;
 
+    bq_structure)
+        exec python3 "$SCRIPTS_DIR/compare_bq_structure.py" \
+            "$@"
+        ;;
+
     *)
-        log_json "ERROR" "Unknown report type: $REPORT_TYPE. Valid types: orphan_datasets, env_drift, commit_drift, file_drift, dataset_mapping"
+        log_json "ERROR" "Unknown report type: $REPORT_TYPE. Valid types: orphan_datasets, env_drift, commit_drift, file_drift, dataset_mapping, bq_structure"
         exit 1
         ;;
 esac

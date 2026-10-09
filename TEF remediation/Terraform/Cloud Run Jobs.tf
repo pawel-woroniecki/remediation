@@ -486,6 +486,47 @@ resource "google_cloud_run_v2_job" "env_drift_dev" {
 }
 
 # ---------------------------------------------------------------------------
+# Job 7: BQ Structure Drift
+# ---------------------------------------------------------------------------
+resource "google_cloud_run_v2_job" "bq_structure" {
+  name     = "devops-reports-bq-structure"
+  location = local.job_region
+  project  = local.job_project
+
+  depends_on = [google_project_service.run]
+
+  template {
+    template {
+      service_account = local.runner_sa
+      timeout         = local.job_timeout
+      max_retries     = local.job_max_retries
+
+      containers {
+        image = local.job_image
+
+        args = [
+          "bq_structure",
+          "--reporting-project", var.reporting_project_id,
+          "--envs",              "prod,test,dev-gke",
+        ]
+
+        resources {
+          limits = {
+            memory = local.job_memory
+            cpu    = local.job_cpu
+          }
+        }
+      }
+
+      vpc_access {
+        connector = data.google_vpc_access_connector.devops_reports.id
+        egress    = "ALL_TRAFFIC"
+      }
+    }
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Outputs
 # ---------------------------------------------------------------------------
 output "orphan_datasets_job_name" {
@@ -510,6 +551,10 @@ output "commit_drift_job_name" {
 
 output "file_drift_job_name" {
   value = google_cloud_run_v2_job.file_drift.name
+}
+
+output "bq_structure_job_name" {
+  value = google_cloud_run_v2_job.bq_structure.name
 }
 
 output "reports_runner_sa_email" {
