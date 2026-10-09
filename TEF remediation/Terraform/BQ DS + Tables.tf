@@ -1027,6 +1027,75 @@ resource "google_bigquery_table" "file_drift_report" {
 }
 
 # ---------------------------------------------------------------------------
+# File-content branch drift — file-level evidence (drill-through for Looker)
+# ---------------------------------------------------------------------------
+
+resource "google_bigquery_table" "file_drift_evidence_report" {
+  project             = var.reporting_project_id
+  dataset_id          = google_bigquery_dataset.devops_reports.dataset_id
+  table_id            = "file_drift_evidence_report"
+  deletion_protection = false
+
+  view {
+    query = <<-EOT
+      WITH latest_exec AS (
+        SELECT
+          execution_id,
+          execution_ts,
+          DATE(execution_ts, 'Europe/Berlin') AS run_date,
+          ROW_NUMBER() OVER (
+            PARTITION BY DATE(execution_ts, 'Europe/Berlin')
+            ORDER BY execution_ts DESC
+          )                                   AS run_number,
+          environment,
+          triggered_by
+        FROM `${var.reporting_project_id}.devops_reports.executions`
+        WHERE report_type = 'file_drift'
+          AND status      = 'success'
+          AND execution_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 90 DAY)
+      )
+
+      SELECT
+        e.run_date,
+        e.run_number,
+        e.execution_ts,
+        e.environment,
+        e.triggered_by,
+        ev.repo,
+        ev.discrepancy,
+        CONCAT(
+          SPLIT(ev.discrepancy, '_not_in_')[OFFSET(0)],
+          ' differs from ',
+          SPLIT(ev.discrepancy, '_not_in_')[OFFSET(1)]
+        )                                     AS drift_direction,
+        ev.file_path,
+        CASE UPPER(ev.change_type)
+          WHEN 'A' THEN 'added'
+          WHEN 'M' THEN 'modified'
+          WHEN 'D' THEN 'deleted'
+          ELSE          'other'
+        END                                   AS change_label,
+        ev.change_type                        AS raw_change_type,
+        ev.author                             AS last_author,
+        ev.commit_date                        AS last_changed_at,
+        ev.commit_sha                         AS last_commit_sha,
+        ev.problem_statement
+      FROM `${var.reporting_project_id}.devops_reports.branch_drift_evidence` ev
+      JOIN latest_exec e USING (execution_id)
+      WHERE ev.drift_type = 'content'
+        AND ev.file_path  IS NOT NULL
+      ORDER BY
+        e.run_date        DESC,
+        e.run_number,
+        ev.repo,
+        ev.discrepancy,
+        ev.file_path
+    EOT
+    use_legacy_sql = false
+  }
+}
+
+# ---------------------------------------------------------------------------
 # BQ structure drift — partitioning / clustering comparison across envs
 # ---------------------------------------------------------------------------
 
