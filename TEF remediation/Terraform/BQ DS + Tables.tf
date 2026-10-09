@@ -605,14 +605,12 @@ resource "google_bigquery_table" "management_dashboard" {
         GROUP BY e.execution_id, COALESCE(e.project_name, f.product), DATE(e.execution_ts), e.execution_ts
       ),
 
-      env_with_run AS (
-        SELECT
-          *,
-          ROW_NUMBER() OVER (
-            PARTITION BY repo, run_date
-            ORDER BY execution_ts
-          ) AS run_number
+      env_latest AS (
+        SELECT *
         FROM env_per_exec
+        QUALIFY ROW_NUMBER() OVER (
+          PARTITION BY repo, run_date ORDER BY execution_ts DESC
+        ) = 1
       ),
 
       commit_latest AS (
@@ -672,7 +670,6 @@ resource "google_bigquery_table" "management_dashboard" {
       SELECT
         COALESCE(env.repo, c.repo, f.repo)             AS repository,
         COALESCE(env.run_date, c.run_date, f.run_date) AS run_date,
-        COALESCE(env.run_number, 1)                    AS run_number,
         COALESCE(env.bq_findings,  0)                  AS bq_findings,
         COALESCE(env.gcs_findings, 0)                  AS gcs_findings,
         COALESCE(c.red_flags,      0)                  AS red_flags,
@@ -685,7 +682,7 @@ resource "google_bigquery_table" "management_dashboard" {
           THEN 'All clear'
           ELSE 'Has findings'
         END                                            AS status
-      FROM env_with_run env
+      FROM env_latest env
       FULL OUTER JOIN commit_latest c
         ON env.repo = c.repo AND env.run_date = c.run_date
       FULL OUTER JOIN file_latest f
