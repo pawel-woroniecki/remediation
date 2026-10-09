@@ -22,12 +22,12 @@ GCS_BUCKET_DEFAULT = "to-be-added-later"
 GCS_PREFIX_DEFAULT = "branch-drift/content"
 
 DISCREPANCY_DEFS: list[dict[str, str]] = [
-    {"name": "prod_not_in_master", "left": "origin/master",     "right": "origin/production"},
-    {"name": "prod_not_in_test",   "left": "origin/test",       "right": "origin/production"},
-    {"name": "test_not_in_master", "left": "origin/master",     "right": "origin/test"},
-    {"name": "test_not_in_prod",   "left": "origin/production", "right": "origin/test"},
-    {"name": "master_not_in_test", "left": "origin/test",       "right": "origin/master"},
-    {"name": "master_not_in_prod", "left": "origin/production", "right": "origin/master"},
+    {"name": "production_not_in_master", "left": "origin/master",     "right": "origin/production"},
+    {"name": "production_not_in_test",   "left": "origin/test",       "right": "origin/production"},
+    {"name": "test_not_in_master",       "left": "origin/master",     "right": "origin/test"},
+    {"name": "test_not_in_production",   "left": "origin/production", "right": "origin/test"},
+    {"name": "master_not_in_test",       "left": "origin/test",       "right": "origin/master"},
+    {"name": "master_not_in_production", "left": "origin/production", "right": "origin/master"},
 ]
 
 # Maps raw git diff --name-status codes to human-readable difference types.
@@ -500,12 +500,12 @@ def main() -> int:
                 "has_master": has_master,
                 "has_test": has_test,
                 "has_production": has_prod,
-                "master_files_not_in_test_by_content":   _val("master_not_in_test", "unique_files"),
-                "test_files_not_in_master_by_content":   _val("test_not_in_master", "unique_files"),
-                "prod_files_not_in_test_by_content":     _val("prod_not_in_test",   "unique_files"),
-                "test_files_not_in_prod_by_content":     _val("test_not_in_prod",   "unique_files"),
-                "prod_files_not_in_master_by_content":   _val("prod_not_in_master", "unique_files"),
-                "master_files_not_in_prod_by_content":   _val("master_not_in_prod", "unique_files"),
+                "master_files_not_in_test_by_content":       _val("master_not_in_test",       "unique_files"),
+                "test_files_not_in_master_by_content":       _val("test_not_in_master",       "unique_files"),
+                "prod_files_not_in_test_by_content":         _val("production_not_in_test",   "unique_files"),
+                "test_files_not_in_prod_by_content":         _val("test_not_in_production",   "unique_files"),
+                "prod_files_not_in_master_by_content":       _val("production_not_in_master", "unique_files"),
+                "master_files_not_in_prod_by_content":       _val("master_not_in_production", "unique_files"),
             })
 
         # Write CSVs
