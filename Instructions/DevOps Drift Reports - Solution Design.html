@@ -344,6 +344,7 @@
             <li><a href="#rep-commit">Commit Drift</a></li>
             <li><a href="#rep-file">File Drift</a></li>
             <li><a href="#rep-orphan">Orphan Datasets</a></li>
+            <li><a href="#rep-bq-structure">BQ Structure Drift</a></li>
           </ul>
         </li>
         <li><a href="#dashboards">Dashboard guide</a></li>
@@ -365,13 +366,13 @@
     <!-- Executive Summary -->
     <section class="section" id="summary">
       <h2><span class="icon">&#128203;</span>Executive Summary</h2>
-      <p>The <strong>DevOps Drift Reports</strong> system automatically detects discrepancies between what is defined in source code (GitLab) and what is actually deployed in GCP environments. It runs six scheduled Cloud Run Jobs every morning and populates BigQuery tables that power Looker Studio dashboards for both operations teams and management.</p>
+      <p>The <strong>DevOps Drift Reports</strong> system automatically detects discrepancies between what is defined in source code (GitLab) and what is actually deployed in GCP environments. It runs seven scheduled Cloud Run Jobs every morning and populates BigQuery tables that power Looker Studio dashboards for both operations teams and management.</p>
 
       <div class="callout info">
         <span class="callout-icon">&#8505;&#65039;</span>
         <div class="callout-body">
           <strong>Why it exists</strong>
-          <p>Manual comparison between code and deployed infrastructure does not scale across 40+ repositories. This system provides automated daily visibility into four types of drift: schema differences, missing branch merges, file content divergence, and abandoned BigQuery datasets.</p>
+          <p>Manual comparison between code and deployed infrastructure does not scale across 40+ repositories. This system provides automated daily visibility into five types of drift: schema differences, missing branch merges, file content divergence, abandoned BigQuery datasets, and BigQuery table structure inconsistencies across environments.</p>
         </div>
       </div>
 
@@ -383,6 +384,7 @@
             <tr><td><strong>Commit Drift</strong></td><td>Commits present in one branch but missing from another</td><td>master &harr; production &harr; test</td><td>DEV</td></tr>
             <tr><td><strong>File Drift</strong></td><td>File content differs between branches (added / modified / deleted)</td><td>master &harr; production &harr; test</td><td>DEV</td></tr>
             <tr><td><strong>Orphan Datasets</strong></td><td>BigQuery datasets with no corresponding source code</td><td>prod</td><td>OPS, DEV</td></tr>
+            <tr><td><strong>BQ Structure Drift</strong></td><td>BigQuery table partitioning &amp; clustering differs across prod / test / dev-gke</td><td>prod, test, dev-gke</td><td>DEV, OPS</td></tr>
           </tbody>
         </table>
       </div>
@@ -398,14 +400,14 @@
         <div class="mermaid">
 flowchart LR
     GL["GitLab\nFastOSS_B/ndl_core\n40+ repos"]
-    CS["Cloud Scheduler\n6 triggers\n05:00-05:50 Berlin"]
-    CRJ["Cloud Run Jobs\n6 jobs\ntefde-gcp-fastoss-dev-gke"]
+    CS["Cloud Scheduler\n7 triggers\n05:00-06:00 Berlin"]
+    CRJ["Cloud Run Jobs\n7 jobs\ntefde-gcp-fastoss-dev-gke"]
     GCP_P["GCP prod\ntefde-gcp-fastoss-prod\nBQ schema + GCS"]
     GCP_T["GCP test\ntefde-gcp-fastoss-test\nBQ schema + GCS"]
     GCP_D["GCP dev\ntefde-gcp-fastoss-dev-gke\nBQ schema"]
     BQ[("BigQuery\ntefde-gcp-fastoss-dev\ndevops_reports dataset")]
     GCS[("GCS\nReport files\n.md / .csv")]
-    LS["Looker Studio\n8 dashboards"]
+    LS["Looker Studio\n9 dashboards"]
 
     CS -->|"HTTP POST RunJob"| CRJ
     CRJ -->|"git clone"| GL
@@ -423,7 +425,7 @@ flowchart LR
         <div class="comp-card">
           <div class="comp-type">Orchestration</div>
           <div class="comp-name">Cloud Scheduler</div>
-          <p>Triggers each Cloud Run Job via HTTP POST to the Cloud Run Admin API. 6 schedules staggered from 05:00&ndash;05:50 Berlin time.</p>
+          <p>Triggers each Cloud Run Job via HTTP POST to the Cloud Run Admin API. 7 schedules staggered from 05:00&ndash;06:00 Berlin time.</p>
         </div>
         <div class="comp-card">
           <div class="comp-type">Compute</div>
@@ -448,7 +450,7 @@ flowchart LR
         <div class="comp-card">
           <div class="comp-type">Visualisation</div>
           <div class="comp-name">Looker Studio</div>
-          <p>Eight dashboards built on top of BigQuery views: Management (health grid), per-environment env drift (prod / test / dev), commit drift with staleness table, file drift, job run status, and orphan datasets.</p>
+          <p>Nine dashboards built on top of BigQuery views: Management (health grid), per-environment env drift (prod / test / dev), commit drift with staleness table, file drift, job run status, orphan datasets, and BQ structure drift.</p>
         </div>
         <div class="comp-card">
           <div class="comp-type">IaC</div>
@@ -473,6 +475,7 @@ flowchart LR
             <tr><td>05:30</td><td><code>devops-reports-file-drift</code></td><td>File Drift</td><td>&mdash;</td><td>GitLab only</td></tr>
             <tr><td>05:40</td><td><code>devops-reports-env-drift-test</code></td><td>Environment Drift</td><td>test</td><td><code>tefde-gcp-fastoss-test</code></td></tr>
             <tr><td>05:50</td><td><code>devops-reports-env-drift-dev</code></td><td>Environment Drift</td><td>dev</td><td><code>tefde-gcp-fastoss-dev-gke</code></td></tr>
+            <tr><td>06:00</td><td><code>devops-reports-bq-structure</code></td><td>BQ Structure Drift</td><td>prod, test, dev-gke</td><td><code>tefde-gcp-fastoss-prod</code>, <code>tefde-gcp-fastoss-test</code>, <code>tefde-gcp-fastoss-dev-gke</code></td></tr>
           </tbody>
         </table>
       </div>
@@ -620,6 +623,29 @@ flowchart TD
           </div>
         </div>
       </div>
+
+      <!-- bq_structure -->
+      <div class="report-card" id="rep-bq-structure">
+        <div class="report-card-header">
+          <h3>BQ Structure Drift (bq_structure)</h3>
+          <span class="pill blue">prod &middot; test &middot; dev-gke</span>
+        </div>
+        <div class="report-card-body">
+          <p>Compares BigQuery table partitioning and clustering settings across three GCP environments. Detects tables that are partitioned differently (or not at all) in lower environments, which can cause query cost surprises or correctness issues when code is promoted.</p>
+          <div class="diagram-card">
+            <div class="diagram-label">bq_structure flow</div>
+            <div class="mermaid">
+flowchart TD
+    A["Cloud Scheduler trigger"] --> B["Cloud Run Job starts\n(no git clone needed)"]
+    B --> C["Query INFORMATION_SCHEMA\nfor each environment in parallel\nprod / test / dev-gke"]
+    C --> D{{"Compare\npartitioning &amp; clustering"}}
+    D -- "Different" --> E["Write DIFF row\nto bq_structure_drift"]
+    D -- "Table absent in lower env" --> F["Write MISSING row\nto bq_structure_drift"]
+    E & F --> G["Write execution record"]
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- Dashboard guide -->
@@ -673,9 +699,15 @@ flowchart TD
               <td>Custom queries on <code>orphan_datasets</code></td>
             </tr>
             <tr>
+              <td><strong>BQ Structure Drift</strong></td>
+              <td>DEV, OPS</td>
+              <td>Which tables have different partitioning or clustering in prod vs test vs dev-gke? Are any tables missing from lower environments entirely?</td>
+              <td><code>bq_structure_drift_report</code> view</td>
+            </tr>
+            <tr>
               <td><strong>Job Run Status</strong></td>
               <td>OPS</td>
-              <td>Did all six jobs run successfully today? How many repos were processed, succeeded, failed, or skipped? How long did each run take? Did each job actually process meaningful work (non-zero repos/datasets)?</td>
+              <td>Did all seven jobs run successfully today? How many repos were processed, succeeded, failed, or skipped? How long did each run take? Did each job actually process meaningful work (non-zero repos/datasets)?</td>
               <td>
                 <code>env_drift_job_summary</code> (env drift stats)<br>
                 <code>commit_drift_job_summary</code> (commit drift stats)<br>

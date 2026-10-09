@@ -419,6 +419,7 @@
             <li><a href="#d-commit">Commit Drift</a></li>
             <li><a href="#d-file">File Drift</a></li>
             <li><a href="#d-orphan">Orphan Datasets</a></li>
+            <li><a href="#d-bq-structure">BQ Structure Drift</a></li>
           </ul>
         </li>
         <li><a href="#problems">Common problems</a></li>
@@ -432,13 +433,13 @@
     <!-- Overview -->
     <section class="section" id="overview">
       <h2><span class="icon">&#128203;</span>Overview</h2>
-      <p>The DevOps Drift Reports system runs six Cloud Run Jobs every morning between 05:00 and 05:50 Berlin time. By 06:10 all jobs will have completed, and the Looker Studio dashboards will reflect the latest results. This runbook tells you what to look at each morning, what a normal state looks like, and what to do when something is wrong.</p>
+      <p>The DevOps Drift Reports system runs seven Cloud Run Jobs every morning between 05:00 and 06:00 Berlin time. By 06:20 all jobs will have completed, and the Looker Studio dashboards will reflect the latest results. This runbook tells you what to look at each morning, what a normal state looks like, and what to do when something is wrong.</p>
 
       <div class="callout info">
         <span class="callout-icon">&#8505;&#65039;</span>
         <div class="callout-body">
-          <strong>Four report types, eight dashboards</strong>
-          <p>The system monitors four types of drift: BigQuery schema differences (<strong>Env Drift</strong>), missing commits between branches (<strong>Commit Drift</strong>), file content differences between branches (<strong>File Drift</strong>), and BigQuery datasets with no code ownership (<strong>Orphan Datasets</strong>). The eight dashboards surface these at different levels of detail.</p>
+          <strong>Five report types, nine dashboards</strong>
+          <p>The system monitors five types of drift: BigQuery schema differences (<strong>Env Drift</strong>), missing commits between branches (<strong>Commit Drift</strong>), file content differences between branches (<strong>File Drift</strong>), BigQuery datasets with no code ownership (<strong>Orphan Datasets</strong>), and BigQuery table structure inconsistencies across environments (<strong>BQ Structure Drift</strong>). The nine dashboards surface these at different levels of detail.</p>
         </div>
       </div>
 
@@ -454,14 +455,14 @@
     <!-- Daily check sequence -->
     <section class="section" id="daily">
       <h2><span class="icon">&#9989;</span>Daily check sequence</h2>
-      <p>Perform this sequence each morning after 06:10 Berlin time. The whole check takes 5&ndash;10 minutes when everything is healthy.</p>
+      <p>Perform this sequence each morning after 06:20 Berlin time. The whole check takes 5&ndash;10 minutes when everything is healthy.</p>
 
       <div class="check-sequence">
         <div class="check-step">
           <div class="step-num">1</div>
           <div class="step-body">
             <strong>Open Job Run Status dashboard</strong>
-            <p>Verify all six jobs show <code>status = success</code> and ran today. Check that <code>repos_processed &gt; 0</code> for commit drift and file drift. A job that succeeded but processed zero repos is a silent failure — treat it as a failed job.</p>
+            <p>Verify all seven jobs show <code>status = success</code> and ran today. Check that <code>repos_processed &gt; 0</code> for commit drift and file drift. A job that succeeded but processed zero repos is a silent failure — treat it as a failed job.</p>
           </div>
         </div>
         <div class="check-step">
@@ -710,6 +711,26 @@
           </div>
         </div>
       </div>
+
+      <!-- BQ Structure Drift -->
+      <div class="dashboard-card" id="d-bq-structure">
+        <div class="dashboard-card-header">
+          <h3>BQ Structure Drift</h3>
+          <span class="pill blue">Schema governance</span>
+        </div>
+        <div class="dashboard-card-body">
+          <p>Shows BigQuery tables where partitioning or clustering settings differ between prod, test, and dev-gke. A structure difference is not an operational emergency, but it can cause query cost surprises and incorrect partition pruning when code is promoted to a higher environment.</p>
+          <h4>What to look at</h4>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Signal</th><th>Severity</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr class="sig-amber"><td><code>discrepancy = MISSING</code> in prod</td><td><span class="pill amber">&#9888;&#65039; Investigate</span></td><td>A table exists in test or dev-gke but not in production. Check whether it is expected (new table not yet deployed) or an error. Verify the Terraform/DDL definition covers production.</td></tr>
+              <tr class="sig-amber"><td><code>discrepancy = DIFF</code> on <code>tp_type</code> or <code>clustering</code></td><td><span class="pill amber">&#9888;&#65039; Monitor</span></td><td>The most impactful differences. A table partitioned by DAY in prod but not at all in dev-gke can cause very different query costs. Notify the DEV team owning the dataset to align the DDL across environments.</td></tr>
+              <tr class="sig-green"><td>Count stable or zero</td><td><span class="pill green">&#10003; OK</span></td><td>No action needed.</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
     </section>
 
     <!-- Common problems -->
@@ -845,7 +866,7 @@
         <span class="callout-icon">&#9989;</span>
         <div class="callout-body">
           <strong>When everything is healthy</strong>
-          <p>A typical all-clear check: Job Run Status shows 6 success rows with repos_processed &gt; 0 for commit/file drift. Management dashboard is all green. No high-risk orphans. Record "All drift reports healthy — [date]" in the OPS log and close the daily check.</p>
+          <p>A typical all-clear check: Job Run Status shows 7 success rows with repos_processed &gt; 0 for commit/file drift. Management dashboard is all green. No high-risk orphans. BQ Structure Drift shows no new MISSING rows. Record "All drift reports healthy — [date]" in the OPS log and close the daily check.</p>
         </div>
       </div>
     </section>
