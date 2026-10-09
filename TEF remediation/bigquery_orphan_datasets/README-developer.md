@@ -2,7 +2,7 @@
 
 This document explains the internal design of the orphan datasets script for
 developers who need to maintain, extend, or debug it.
-For operational use (parameters, examples, outputs) see [README (2).md](<README (2).md>).
+For operational use (parameters, examples, outputs) see [README.md](README.md).
 
 ---
 

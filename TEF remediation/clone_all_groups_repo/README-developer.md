@@ -2,7 +2,7 @@
 
 This document explains the internal design of the GitLab clone/update script for
 developers who need to maintain, extend, or debug it.
-For operational use (parameters, examples) see [README (4).md](<README (4).md>).
+For operational use (parameters, examples) see [README.md](README.md).
 
 ---
 
