@@ -40,7 +40,9 @@ Options:
 import argparse
 import csv
 import json
+import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field as dc_field
 from datetime import datetime, timezone
@@ -65,6 +67,7 @@ ENV_TO_PROJECT: dict[str, str] = {
 REPORTING_PROJECT_DEFAULT = "tefde-gcp-fastoss-dev"
 REPORTING_DATASET         = "devops_reports"
 DRIFT_TABLE               = "bq_structure_drift"
+EXECUTIONS_TABLE          = "executions"
 
 # Attributes compared per table (in order they appear in the report)
 ATTRIBUTES = [
@@ -326,6 +329,38 @@ def print_summary(rows: list[dict], envs: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Execution logging (mirrors pattern used by other report scripts)
+# ---------------------------------------------------------------------------
+
+def write_execution(
+    execution_id: str,
+    reporting_project: str,
+    envs: list[str],
+    triggered_by: str,
+    execution_ts: datetime,
+    status: str,
+    start_time: float,
+) -> None:
+    table_ref = f"{reporting_project}.{REPORTING_DATASET}.{EXECUTIONS_TABLE}"
+    row = {
+        "execution_id":     execution_id,
+        "report_type":      "bq_structure",
+        "execution_ts":     execution_ts.isoformat(),
+        "environment":      ",".join(envs),
+        "triggered_by":     triggered_by,
+        "status":           status,
+        "duration_seconds": int(time.monotonic() - start_time),
+    }
+    try:
+        client = bigquery.Client(project=reporting_project)
+        errors = client.insert_rows_json(table_ref, [row])
+        if errors:
+            print(f"WARNING: could not write execution record: {errors}", file=sys.stderr)
+    except Exception as exc:
+        print(f"WARNING: could not write execution record: {exc}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -377,6 +412,10 @@ def main() -> None:
     checked_at    = datetime.now(timezone.utc)
     run_id        = checked_at.strftime("%Y%m%dT%H%M%SZ")
 
+    execution_id = os.environ.get("EXECUTION_ID") or run_id
+    triggered_by = os.environ.get("TRIGGERED_BY", "manual")
+    start_time   = time.monotonic()
+
     repo_mapping: dict | None = None
     if args.mapping_file:
         mapping_path = Path(args.mapping_file)
@@ -393,45 +432,56 @@ def main() -> None:
     print(f"Run ID                 : {run_id}")
     print()
 
-    # Parallel fetch
-    env_data: dict[str, dict[tuple[str, str], TableMeta]] = {}
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {
-            pool.submit(fetch_env, e, ENV_TO_PROJECT[e], only_datasets): e
-            for e in envs
-        }
-        for fut in as_completed(futures):
-            e = futures[fut]
-            try:
-                result = fut.result()
-                env_data[e] = result
-                print(f"  [{e}] fetched {len(result)} table(s)")
-            except Exception as exc:
-                print(f"  [{e}] FAILED: {exc}", file=sys.stderr)
-                env_data[e] = {}
+    try:
+        # Parallel fetch
+        env_data: dict[str, dict[tuple[str, str], TableMeta]] = {}
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futures = {
+                pool.submit(fetch_env, e, ENV_TO_PROJECT[e], only_datasets): e
+                for e in envs
+            }
+            for fut in as_completed(futures):
+                e = futures[fut]
+                try:
+                    result = fut.result()
+                    env_data[e] = result
+                    print(f"  [{e}] fetched {len(result)} table(s)")
+                except Exception as exc:
+                    print(f"  [{e}] FAILED: {exc}", file=sys.stderr)
+                    env_data[e] = {}
 
-    # Compare
-    rows = compare(envs, env_data, prod_env, repo_mapping)
-    print_summary(rows, envs)
+        # Compare
+        rows = compare(envs, env_data, prod_env, repo_mapping)
+        print_summary(rows, envs)
 
-    if not rows:
-        print("No discrepancies found.")
-        return
+        if not rows:
+            print("No discrepancies found.")
+        else:
+            # Write to BigQuery
+            if not args.no_bq:
+                print(f"Writing {len(rows)} row(s) to "
+                      f"{args.reporting_project}.{REPORTING_DATASET}.{DRIFT_TABLE} ...", end=" ")
+                written = write_bq(rows, run_id, checked_at, envs, args.reporting_project)
+                print(f"{written} row(s) inserted.")
 
-    # Write to BigQuery
-    if not args.no_bq:
-        print(f"Writing {len(rows)} row(s) to "
-              f"{args.reporting_project}.{REPORTING_DATASET}.{DRIFT_TABLE} ...", end=" ")
-        written = write_bq(rows, run_id, checked_at, envs, args.reporting_project)
-        print(f"{written} row(s) inserted.")
+            # Write CSV
+            if args.output:
+                write_csv(rows, envs, args.output)
+                print(f"CSV written to {args.output}")
 
-    # Write CSV
-    if args.output:
-        write_csv(rows, envs, args.output)
-        print(f"CSV written to {args.output}")
+            if args.no_bq and not args.output:
+                print("(No output written — add --output FILE or remove --no-bq to persist results.)")
 
-    if args.no_bq and not args.output:
-        print("(No output written — add --output FILE or remove --no-bq to persist results.)")
+        if not args.no_bq:
+            write_execution(execution_id, args.reporting_project, envs,
+                            triggered_by, checked_at, "success", start_time)
+
+    except Exception as exc:
+        print(f"FATAL: {exc}", file=sys.stderr)
+        if not args.no_bq:
+            write_execution(execution_id, args.reporting_project, envs,
+                            triggered_by, checked_at, "failed", start_time)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
