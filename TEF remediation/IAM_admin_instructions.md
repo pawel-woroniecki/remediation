@@ -84,19 +84,27 @@ gcloud secrets add-iam-policy-binding gitlab-token \
 
 ---
 
-#### Grant 2 — GCS bucket: write report CSV outputs
+#### Grant 2 — GCS bucket: write report CSV outputs and dataset mapping
 
-**Why:** All four report scripts upload CSV output files to this bucket
-after each run.
+**Why:** Report scripts upload CSV output files to this bucket after each
+run. The `bq_structure` job additionally overwrites
+`dataset-mapping/dataset_repo_map.json` on every execution to keep the
+mapping file fresh. Overwriting an existing object requires
+`roles/storage.objectAdmin`; `roles/storage.objectCreator` alone is
+insufficient for overwrite.
+
+> **Note:** If a `roles/storage.objectCreator` binding for this SA was
+> applied previously, it is now superseded by `objectAdmin` and can be
+> removed, but it is harmless to leave both in place.
 
 **Resource:** Bucket `tefde-gcp-fastoss-dev-gcs-devops-reports`
-**Role:** `roles/storage.objectCreator`
+**Role:** `roles/storage.objectAdmin`
 
 **gcloud CLI:**
 ```bash
 gcloud storage buckets add-iam-policy-binding \
   gs://tefde-gcp-fastoss-dev-gcs-devops-reports \
-  --role=roles/storage.objectCreator \
+  --role=roles/storage.objectAdmin \
   --member="serviceAccount:devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com"
 ```
 
@@ -106,7 +114,7 @@ gcloud storage buckets add-iam-policy-binding \
 3. Select the **Permissions** tab
 4. Click **Grant Access**
 5. New principals: `devops-reports-runner@tefde-gcp-resvadm-prod-backend.iam.gserviceaccount.com`
-6. Role: `Storage Object Creator`
+6. Role: `Storage Object Admin`
 7. Click **Save**
 
 ---
@@ -430,7 +438,7 @@ gcloud storage buckets add-iam-policy-binding gs://fastoss-prod-composer-3 \
 | # | Project | Resource | Role | Principal |
 |---|---|---|---|---|
 | 1 | `tefde-gcp-fastoss-dev-gke` | Secret `gitlab-token` | `roles/secretmanager.secretAccessor` | `devops-reports-runner` SA |
-| 2 | `tefde-gcp-fastoss-dev-gke` | Bucket `tefde-gcp-fastoss-dev-gcs-devops-reports` | `roles/storage.objectCreator` | `devops-reports-runner` SA |
+| 2 | `tefde-gcp-fastoss-dev-gke` | Bucket `tefde-gcp-fastoss-dev-gcs-devops-reports` | `roles/storage.objectAdmin` | `devops-reports-runner` SA |
 | 3 | `tefde-gcp-fastoss-dev-gke` | AR repo `devops-reports` (europe-west3) | `roles/artifactregistry.reader` | `devops-reports-runner` SA |
 | 4 | `tefde-gcp-fastoss-dev-gke` | AR repo `devops-reports` (europe-west3) | `roles/artifactregistry.writer` | `devops-reports-runner` SA |
 | 5 | `tefde-gcp-fastoss-dev-gke` | Project | `roles/run.developer` | `devops-reports-runner` SA |
