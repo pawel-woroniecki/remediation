@@ -48,7 +48,6 @@ zero. Three filter controls let managers narrow the view by date, run, and overa
 
    | Field | Change to |
    |---|---|
-   | `run_number` | **Number** with **No aggregation** (make it a Dimension, not a Metric) |
    | `status` | **Text** — confirm it is already a Dimension |
    | `bq_findings` | **Number**, Aggregation: **Sum** |
    | `gcs_findings` | **Number**, Aggregation: **Sum** |
@@ -106,7 +105,7 @@ For each of the four metrics, create a calculated field:
 
 1. **Insert → Table**.
 2. In the **Setup** panel, set:
-   - **Dimensions:** `repository`, `run_number`, `GCP`, `GCS`, `Branch drift`, `File drift`
+   - **Dimensions:** `repository`, `GCP`, `GCS`, `Branch drift`, `File drift`
    - **Metrics:** *(none — remove any that Looker Studio adds automatically)*
    - **Sort:** `repository` ascending
    - **Rows per page:** `50`
@@ -157,15 +156,7 @@ Insert three controls above the table:
 3. The control automatically binds to the `run_date` field (set as Date range dimension in
    Step 4).
 
-### Filter 2 — Run number
-
-1. **Insert → Filter control**.
-2. Field: `run_number`.
-3. Control type: **Drop-down list**.
-4. Label: `Run`.
-5. Use this to switch between Run 1 and Run 2 on days when the env_drift job was re-triggered.
-
-### Filter 3 — Status (the show-all toggle)
+### Filter 2 — Status (the show-all toggle)
 
 1. **Insert → Filter control**.
 2. Field: `status`.
@@ -224,11 +215,10 @@ the all-green rows so only problem repositories remain visible.
 |---|---|---|
 | `repository` | Dimension | GitLab project name |
 | `run_date` | Date dimension | Date of the run — use as the date range filter field |
-| `run_number` | Dimension | Sequential env-drift run number per day (1 = first run). All-green repos that had no env-drift findings are assigned run_number = 1. |
 | `bq_findings` | Metric | BigQuery drift finding count |
 | `gcs_findings` | Metric | GCS drift finding count |
 | `branch_drift` | Metric | Total unique commits across all branch comparisons (commit drift) |
-| `file_drift` | Metric | Total unique files across all branch comparisons (file drift) |
+| `file_drift` | Metric | Files drifting in critical directions only (production not in master/test, test not in master) |
 | `status` | Dimension | `All clear` when all four metrics = 0; `Has findings` otherwise |
 | `GCP` | Calculated | `"●"` when bq_findings = 0, otherwise the count as text |
 | `GCS` | Calculated | `"●"` when gcs_findings = 0, otherwise the count as text |
