@@ -79,8 +79,7 @@ KPI counts) by drilling down to the individual file level.
 
 1. **Insert → Table**.
 2. In the **Setup** panel set:
-   - **Dimensions:** `repo`, `drift_direction`, `file_path`, `change_label`, `last_author`
-   - **Metrics:** `last_changed_at` (set aggregation to **None** or **Max**)
+   - **Dimensions:** `repo`, `drift_direction`, `file_path`, `change_label`, `last_author`, `last_changed_at`
    - **Sort:** `repo` ascending, then `drift_direction`, then `file_path` ascending.
    - **Rows per page:** `100`.
    - **Date range dimension:** `run_date` — connects this table to the Date Range Control.
