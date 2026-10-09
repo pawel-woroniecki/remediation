@@ -25,10 +25,13 @@ dev-gke environments, for the most recent run or any historical snapshot.
 
 ## Prerequisites
 
-- At least one `compare_bq_structure.py` run has completed successfully (so the
-  `bq_structure_drift` table has data). Run it from Cloud Shell if needed:
+- At least one `devops-reports-bq-structure` Cloud Run Job execution has completed
+  successfully (so the `bq_structure_drift` table has data). It runs automatically
+  at 06:00 CET; to trigger it immediately:
   ```bash
-  python "TEF remediation/scripts/compare_bq_structure.py"
+  gcloud run jobs execute devops-reports-bq-structure \
+    --project=tefde-gcp-fastoss-dev-gke \
+    --region=europe-west3
   ```
   Verify rows exist:
   ```sql
@@ -47,9 +50,9 @@ dev-gke environments, for the most recent run or any historical snapshot.
 2. Click **Create → Report**.
 3. In the data source picker choose **BigQuery → My Projects**.
 4. Select **`tefde-gcp-fastoss-dev` → `devops_reports` → `bq_structure_drift_report`**.
-5. **Leave "Enable date range parameters" unchecked.** The view uses a `ROW_NUMBER()`
-   window function — checking this box would push a date filter into the query and break
-   the `run_number` calculation.
+5. **Leave all options at their defaults and click Connect.** Date filtering is handled
+   by the Run date dropdown filter (Step 3) — the view uses a `ROW_NUMBER()` window
+   function, so do not set a Date range dimension on the charts.
 6. Name the data source `BQ Structure Drift`.
 7. Click **Add** (top right) → **Add to Report**.
 
@@ -90,9 +93,9 @@ Insert these four controls in a row at the top of the canvas.
 3. The dropdown lists every date on which `compare_bq_structure.py` ran successfully.
    Selecting one date shows the snapshot from that run.
 
-> **"Enable date range parameters" must be UNCHECKED** on the data source — same rule as
-> all other dashboards in this project. The view uses a window function, not a date range
-> parameter.
+> This dashboard uses a **Run date dropdown** for date selection (not a Date Range Control),
+> because the view uses a `ROW_NUMBER()` window function. A Date range dimension would
+> interfere with the `run_number` calculation — do not add one to any chart here.
 
 ### Filter 2 — Run number
 

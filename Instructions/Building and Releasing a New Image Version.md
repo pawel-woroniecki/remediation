@@ -5,10 +5,10 @@ Artifact Registry, and — the step people most often forget — **explicitly re
 so it actually starts using the new image.
 
 There is one image in this project: `devops-reports`, built from `Dockerfile.python`
-(report scripts and `entrypoint.sh`), used by all 6 Cloud Run Jobs.
+(report scripts and `entrypoint.sh`), used by all 7 Cloud Run Jobs.
 
 Change anything in the report scripts (`git_branches_gap/`, `git_gcp_code_vs_environment_drift/`,
-`bigquery_orphan_datasets/`, `clone_all_groups_repo/`, `entrypoint.sh`, `Dockerfile.python`) →
+`bigquery_orphan_datasets/`, `clone_all_groups_repo/`, `scripts/`, `entrypoint.sh`, `Dockerfile.python`) →
 rebuild `devops-reports`.
 
 ---
@@ -96,7 +96,7 @@ gcloud run jobs update devops-reports-commit-drift \
   --region=europe-west3
 ```
 Job names: `devops-reports-orphan-datasets`, `devops-reports-env-drift`,
-`devops-reports-commit-drift`, `devops-reports-file-drift`.
+`devops-reports-commit-drift`, `devops-reports-file-drift`, `devops-reports-bq-structure`.
 
 If you use Method B, remember to also do Method A's Step 1 edit afterward (without re-applying
 immediately) so `terraform.tfvars` reflects reality — otherwise the *next* unrelated
