@@ -40,14 +40,17 @@ KPI counts) by drilling down to the individual file level.
 2. Click **Create → Report**.
 3. In the data source picker choose **BigQuery → My Projects**.
 4. Select **`tefde-gcp-fastoss-dev` → `devops_reports` → `file_drift_evidence_report`**.
-5. **Leave "Enable date range parameters" unchecked.** The view uses a fixed 90-day
-   lookback window and does not use `@DS_START_DATE`/`@DS_END_DATE` parameters.
-   Checking this box would cause an error.
+5. **Check "Enable date range parameters".** The view uses `@DS_START_DATE` and
+   `@DS_END_DATE` parameters so Looker Studio can push the chosen date range into
+   the query. Leaving it unchecked will cause a parameter error.
 6. Name the data source `File Drift Details`.
 7. Click **Add** (top right) → **Add to Report**.
 
-> The `file_drift_evidence_report` view is defined in
-> `TEF remediation/Terraform/BQ DS + Tables.tf`.
+> The `file_drift_evidence_report` view uses `@DS_START_DATE`/`@DS_END_DATE` —
+> it requires "Enable date range parameters" to be checked or it will fail with
+> a parameter error when Looker Studio queries it.
+>
+> The view is defined in `TEF remediation/Terraform/BQ DS + Tables.tf`.
 > The SQL reference file is `TEF remediation/looker_sql/file_drift_evidence_report.sql`.
 
 ---
@@ -105,14 +108,21 @@ KPI counts) by drilling down to the individual file level.
 
 Insert these controls above the table and bar chart.
 
+### Filter 0 — Date range
+
+1. **Insert → Date range control**.
+2. This is the primary time filter — it drives `@DS_START_DATE` and `@DS_END_DATE`
+   into the view query, so only runs within the chosen range are returned.
+3. Set a default range such as **Last 30 days**.
+
 ### Filter 1 — Run date
 
 1. **Insert → Filter control**.
 2. Field: `run_date`. Control type: **Drop-down list**. Label: `Run date`.
 3. Select a specific date to see the snapshot from that run.
 
-> **"Enable date range parameters" must be UNCHECKED** on the `File Drift Details`
-> data source — the view uses a fixed 90-day lookback, not Looker Studio date parameters.
+> **"Enable date range parameters" must be CHECKED** on the `File Drift Details`
+> data source — the view uses `@DS_START_DATE`/`@DS_END_DATE` parameters.
 
 ### Filter 2 — Run number
 
