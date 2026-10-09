@@ -646,8 +646,18 @@ resource "google_bigquery_table" "management_dashboard" {
         SELECT
           k.repo,
           k.run_date,
-          SUM(CASE WHEN k.status = 'ok' THEN COALESCE(k.unique_files, 0) ELSE 0 END)
-            AS file_drift
+          SUM(CASE
+            WHEN k.status = 'ok'
+              AND (
+                (REGEXP_EXTRACT(k.right_branch, r'origin/(.+)') = 'production'
+                 AND REGEXP_EXTRACT(k.left_branch,  r'origin/(.+)') IN ('master','test'))
+                OR
+                (REGEXP_EXTRACT(k.right_branch, r'origin/(.+)') = 'test'
+                 AND REGEXP_EXTRACT(k.left_branch,  r'origin/(.+)') = 'master')
+              )
+            THEN COALESCE(k.unique_files, 0)
+            ELSE 0
+          END) AS file_drift
         FROM `${var.reporting_project_id}.devops_reports.branch_drift_kpis` k
         JOIN `${var.reporting_project_id}.devops_reports.executions` e
           USING (execution_id)
