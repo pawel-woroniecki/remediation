@@ -241,6 +241,7 @@ resource "google_cloud_run_v2_job" "commit_drift" {
           "--gcp-project",       var.project_id,
           "--reporting-project", var.reporting_project_id,
           "--gcs-bucket",        var.reports_gcs_bucket,
+          "--exclude-repos",     "central_cicd_templates cloud_run_source dataflow dataquality_framework monitoring",
         ]
 
         env {
@@ -304,6 +305,7 @@ resource "google_cloud_run_v2_job" "file_drift" {
           "--gcp-project",       var.project_id,
           "--reporting-project", var.reporting_project_id,
           "--gcs-bucket",        var.reports_gcs_bucket,
+          "--exclude-repos",     "central_cicd_templates cloud_run_source dataflow dataquality_framework monitoring",
         ]
 
         env {
