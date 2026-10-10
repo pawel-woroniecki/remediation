@@ -558,7 +558,12 @@
             <thead><tr><th>Signal</th><th>Severity</th><th>What it means</th><th>Action</th></tr></thead>
             <tbody>
               <tr class="sig-red"><td><code>repos_processed = 0</code> with <code>status = success</code></td><td><span class="pill red">&#128680; Silent failure</span></td><td>The job reported success but touched no repositories. The GitLab clone loop likely failed before processing any repo.</td><td>Check Cloud Run logs for the job execution. Look for errors fetching the subgroup repo list or cloning the first repo. This is the most dangerous failure mode — dashboards look healthy but all data is stale.</td></tr>
-              <tr class="sig-amber"><td><code>repos_missing_branch</code> &gt; expected</td><td><span class="pill amber">&#9888;&#65039; Monitor</span></td><td>More repos than usual don't have one of the monitored branches (master / production / test).</td><td>Acceptable for demo or archived projects. If a production repo suddenly shows <code>missing_branch</code>, verify the branch wasn't accidentally deleted.</td></tr>
+              <tr class="sig-amber"><td><code>repos_missing_branch</code> &gt; expected</td><td><span class="pill amber">&#9888;&#65039; Monitor</span></td><td>More repos than usual don't have one of the monitored branches (master / production / test).</td><td>Acceptable for demo or archived projects. If a production repo suddenly shows <code>missing_branch</code>, verify the branch wasn't accidentally deleted. To identify <strong>which repos</strong> are affected, run in BigQuery:<pre style="background:#f4f4f4;padding:8px;border-radius:4px;font-size:12px;white-space:pre-wrap">SELECT repo, left_branch, right_branch, run_date
+FROM `tefde-gcp-fastoss-dev.devops_reports.branch_drift_kpis`
+WHERE drift_type = 'commit'
+  AND status     = 'missing_branch'
+  AND run_date   = CURRENT_DATE()
+ORDER BY repo;</pre></td></tr>
               <tr class="sig-green"><td><code>repos_processed &gt; 0</code>, <code>status = success</code></td><td><span class="pill green">&#10003; OK</span></td><td>Job ran and processed repositories.</td><td>None.</td></tr>
             </tbody>
           </table></div>
