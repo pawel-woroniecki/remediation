@@ -544,6 +544,9 @@ Looker Studio filtering.
 **IAM required**
 - `roles/bigquery.metadataViewer` on the prod, test, and dev-gke projects
 - `roles/bigquery.dataEditor` on `devops_reports.bq_structure_drift` in `tefde-gcp-fastoss-dev`
+- `roles/bigquery.dataEditor` on `devops_reports.executions` in `tefde-gcp-fastoss-dev` (execution logging)
+- `roles/storage.objectAdmin` on the reports GCS bucket (reads the dataset→repo mapping file)
+- `roles/secretmanager.secretAccessor` on the `gitlab-token` secret (clones repos for the mapping)
 
 **Run**
 ```bash
@@ -573,13 +576,15 @@ python "TEF remediation/scripts/compare_bq_structure.py" \
 | `--envs LIST` | `prod,test,dev-gke` | Comma-separated environments. First env is the reference (source of truth for MISSING checks). |
 | `--dataset DATASET_ID` | all | Only compare this dataset. Repeatable. |
 | `--reporting-project ID` | `tefde-gcp-fastoss-dev` | Project holding `devops_reports`. |
+| `--mapping-file PATH` | none | Path to a local `dataset_repo_map.json` (produced by `generate_dataset_mapping.py`). When provided, a `repository` column is added to every output row linking the dataset to its GitLab repo. |
 | `--output PATH` | none | Also write results to a CSV file. |
 | `--no-bq` | off | Skip BigQuery write; print to terminal and/or CSV only. |
 | `--workers N` | `3` | Thread-pool size for parallel project fetching. |
 
 **Output**
 Terminal: summary counts (MISSING / DIFF), then a capped table of up to 50 rows.
-BigQuery: rows appended to `devops_reports.bq_structure_drift` (partitioned by `checked_at`, clustered by `dataset_id`).
+BigQuery: rows appended to `devops_reports.bq_structure_drift` (partitioned by `checked_at`, clustered by `dataset_id`). Includes a `repository` column when `--mapping-file` is provided.
+Each run also writes one row to `devops_reports.executions` (success or failure) so the run appears in the Jobs Runs Status dashboard.
 Each run gets a unique `run_id` (e.g. `20260924T143012Z`) so historical data is preserved for trending.
 
 **Looker Studio dashboard setup**
@@ -590,9 +595,11 @@ dataset `devops_reports`.
 Suggested charts:
 1. **Scorecard** — count of rows where `discrepancy = 'MISSING'` and `run_number = 1`
 2. **Scorecard** — count of rows where `discrepancy = 'DIFF'` and `run_number = 1`
-3. **Table** — filter `run_number = 1`; columns: `dataset_id`, `table_id`, `table_type`, `discrepancy`, `attribute`, `prod_value`, `test_value`, `dev_gke_value`
+3. **Table** — filter `run_number = 1`; columns: `repository`, `dataset_id`, `table_id`, `table_type`, `discrepancy`, `attribute`, `prod_value`, `test_value`, `dev_gke_value`
 4. **Bar chart** — discrepancy count by `dataset_id` (latest run)
 5. **Time-series line chart** — total discrepancy count per `run_date` (trend over time)
 6. **Filter control** on `run_date` and `run_number`
+
+> The `repository` column is populated automatically by the Cloud Run Job (which runs `generate_dataset_mapping.py` before each compare). When running the script locally with `--no-bq`, pass `--mapping-file dataset_repo_map.json` to populate it.
 
 > "Enable date range parameters" must be **UNCHECKED** on this data source.

@@ -23,7 +23,7 @@ All reports write their results to BigQuery (`devops_reports` dataset in
 
 ## 1. Automatic (scheduled) runs
 
-All 6 Cloud Run Jobs run **automatically every day** — no action needed for routine reporting.
+All 7 Cloud Run Jobs run **automatically every day** — no action needed for routine reporting.
 
 | Cloud Run Job | Scheduler trigger name | Time (Europe/Berlin) |
 |---|---|---|

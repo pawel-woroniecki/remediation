@@ -22,7 +22,7 @@ terraform apply -var-file="terraform.tfvars"
 ```
 
 Create `terraform.tfvars` from the table in the **Variables** section below.
-State is stored locally in `terraform.tfstate` (see `backend.tf`).
+State is stored remotely in GCS (see `backend.tf`).
 
 ---
 
@@ -48,9 +48,9 @@ Declares the `hashicorp/google` provider `~> 5.0` and sets the default project
 and region. Requires Terraform `>= 1.4.0`.
 
 ### `backend.tf`
-Configures a **local** state backend — state is stored in `terraform.tfstate`
-in this folder. Keep this file out of version control when it contains sensitive
-output values. If the team moves to a remote backend (GCS), update this file.
+Configures a **GCS remote backend** — state is stored in
+`gs://tefde-gcp-fastoss-terraform-states/TEF_remediation/PROD/terraform.tfstate`.
+Run `terraform init` once after any backend change to migrate local state.
 
 ### `BQ variables.tf`
 Declares all input variables for the workspace:

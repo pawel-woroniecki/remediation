@@ -6,15 +6,19 @@ A cloud-native reporting framework that detects drift and governance gaps across
 
 ## Reports
 
-All 4 reports run automatically every day via Cloud Scheduler (`scheduler.tf`). They can be
-triggered manually via `gcloud run jobs execute`. Schedule times are `Europe/Berlin`.
+All 5 reports run automatically every day across 7 Cloud Run Jobs via Cloud Scheduler
+(`scheduler.tf`). They can be triggered manually via `gcloud run jobs execute`. Schedule
+times are `Europe/Berlin`.
 
 | # | Report | Script | Cloud Run job name | Daily schedule |
 |---|---|---|---|---|
-| 1 | Commit-based branch drift | `git_branches_gap/report_branch_discrepancies_by_commit.py` | `devops-reports-commit-drift` | 05:20 |
-| 2 | File-content branch drift | `git_branches_gap/report_branch_discrepancies_by_content.py` | `devops-reports-file-drift` | 05:30 |
-| 3 | Environment vs code drift | `git_gcp_code_vs_environment_drift/generate_code_environment_drift_report.py` | `devops-reports-env-drift` | 05:10 |
-| 4 | Orphan BigQuery datasets | `bigquery_orphan_datasets/unmatched_bq_datasets_report.py` | `devops-reports-orphan-datasets` | 05:00 |
+| 1 | Orphan BigQuery datasets | `bigquery_orphan_datasets/unmatched_bq_datasets_report.py` | `devops-reports-orphan-datasets` | 05:00 |
+| 2 | Environment vs code drift (prod) | `git_gcp_code_vs_environment_drift/generate_code_environment_drift_report.py` | `devops-reports-env-drift` | 05:10 |
+| 3 | Commit-based branch drift | `git_branches_gap/report_branch_discrepancies_by_commit.py` | `devops-reports-commit-drift` | 05:20 |
+| 4 | File-content branch drift | `git_branches_gap/report_branch_discrepancies_by_content.py` | `devops-reports-file-drift` | 05:30 |
+| 5 | Environment vs code drift (test) | `git_gcp_code_vs_environment_drift/generate_code_environment_drift_report.py` | `devops-reports-env-drift-test` | 05:40 |
+| 6 | Environment vs code drift (dev) | `git_gcp_code_vs_environment_drift/generate_code_environment_drift_report.py` | `devops-reports-env-drift-dev` | 05:50 |
+| 7 | BQ table structure drift | `scripts/compare_bq_structure.py` | `devops-reports-bq-structure` | 06:00 |
 
 ---
 
@@ -47,6 +51,9 @@ triggered manually via `gcloud run jobs execute`. Schedule times are `Europe/Ber
 │  GCS bucket │            │  - env_drift_findings         │
 │  CSV outputs│            │  - orphan_datasets            │
 └─────────────┘            │  - orphan_dataset_objects     │
+                           │  - bq_structure_drift         │
+                           │  + views (drift reports,      │
+                           │    bq_structure_drift_report) │
                            └──────────────┬────────────────┘
                                           │
                                           ▼
@@ -119,7 +126,7 @@ TEF remediation/
 └── Terraform/
     ├── BQ variables.tf       # All input variables
     ├── BQ DS + Tables.tf     # Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true); IAM bindings commented out — managed by TEF IAM Team
-    ├── Cloud Run Jobs.tf     # 4 Cloud Run Job resources (VPC egress via connector)
+    ├── Cloud Run Jobs.tf     # 7 Cloud Run Job resources + 1 on-demand (VPC egress via connector)
     ├── scheduler.tf          # Daily Cloud Scheduler triggers for the 4 report jobs; IAM binding commented out — managed by TEF IAM Team
     ├── artifact_registry.tf  # Artifact Registry repo; IAM bindings commented out — managed by TEF IAM Team
     ├── networking.tf         # Data source for the Networking Team's VPC Access Connector (Shared VPC)
