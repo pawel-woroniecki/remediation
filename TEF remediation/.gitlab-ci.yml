@@ -46,7 +46,7 @@ variables:
     - rm -f /tmp/gcp-sa-key.json
 
 # ---------------------------------------------------------------------------
-# Reports image (all 4 Cloud Run Jobs)
+# Reports image (all Cloud Run Jobs)
 # ---------------------------------------------------------------------------
 build-reports:
   stage: build
@@ -60,6 +60,7 @@ build-reports:
         - git_gcp_code_vs_environment_drift/**/*
         - bigquery_orphan_datasets/**/*
         - clone_all_groups_repo/**/*
+        - scripts/**/*
         - entrypoint.sh
   script:
     - IMAGE="$REGISTRY/$PROJECT_ID/$REPO/devops-reports"
