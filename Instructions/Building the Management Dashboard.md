@@ -24,7 +24,7 @@ zero. Three filter controls let managers narrow the view by date, run, and overa
 ## Prerequisites
 
 - `terraform apply` has been run (the `management_dashboard` view must exist in BigQuery).
-- At least one execution of all four report jobs has completed (env_drift, commit_drift,
+- At least one execution of all three report jobs has completed (env_drift, commit_drift,
   file_drift) — the view joins all three and needs data from each.
 - A `telefonica.de` Google account with read access to `tefde-gcp-fastoss-dev`.
 
@@ -231,6 +231,6 @@ the all-green rows so only problem repositories remain visible.
 
 - `Instructions/Building the Env Drift Summary Dashboard.md` — detailed env-drift dashboard
   with report links
-- `Instructions/Building the Looker Studio Dashboards.md` — full 4-page dashboard guide and
+- `Instructions/Building the Looker Studio Dashboards.md` — combined dashboard guide and
   one-time GCP service account setup
 - `TEF remediation/Terraform/BQ DS + Tables.tf` — `management_dashboard` view definition

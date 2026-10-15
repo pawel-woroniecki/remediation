@@ -1,8 +1,11 @@
 # Building the Looker Studio Dashboards — Step-by-Step Guide
 
 This document walks through building a 4-page Looker Studio report on top of the
-`devops_reports` BigQuery dataset: an Overview/Health page plus one page per report type. It
-uses the queries already written in `looker_sql/` and the `execution_daily_summary` view.
+`devops_reports` BigQuery dataset: an Overview/Health page plus one page each for Branch Drift,
+Environment Drift (prod), and Orphan Datasets. It uses the queries already written in
+`looker_sql/` and the `execution_daily_summary` view.
+
+For the BQ Structure Drift dashboard, see `Instructions/Building the BQ Structure Drift Dashboard.md`.
 
 The dashboard uses Service Account Credentials so it remains accessible after any individual
 leaves the organisation. Complete the one-time GCP setup in Step 0 before building the report.

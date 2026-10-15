@@ -125,6 +125,6 @@ Selecting **Run = 1** and **Date = yesterday** shows exactly one row per reposit
 
 ## Related
 
-- `Instructions/Building the Looker Studio Dashboards.md` — full 4-page dashboard guide and one-time GCP service account setup
-- `Instructions/Building the Management Dashboard.md` — executive red/green health grid across all 4 report types
+- `Instructions/Building the Looker Studio Dashboards.md` — combined dashboard guide and one-time GCP service account setup
+- `Instructions/Building the Management Dashboard.md` — executive red/green health grid across all report types
 - `TEF remediation/Terraform/BQ DS + Tables.tf` — `env_drift_summary` view definition
