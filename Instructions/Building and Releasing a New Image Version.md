@@ -96,6 +96,7 @@ gcloud run jobs update devops-reports-commit-drift \
   --region=europe-west3
 ```
 Job names: `devops-reports-orphan-datasets`, `devops-reports-env-drift`,
+`devops-reports-env-drift-test`, `devops-reports-env-drift-dev`,
 `devops-reports-commit-drift`, `devops-reports-file-drift`, `devops-reports-bq-structure`.
 
 If you use Method B, remember to also do Method A's Step 1 edit afterward (without re-applying
@@ -143,9 +144,9 @@ image; only `:latest` ever moves). You don't need to rebuild anything to roll ba
 ## Releasing a full version (optional)
 
 If this change is significant enough to warrant a version tag (see `Readme.md`'s CI/CD section
-for the convention used so far, e.g. `v3.0.0`):
+for the convention used so far, e.g. `v4.0.0`):
 ```bash
-git tag -a v3.1.0 -m "Release v3.1.0: <summary>"
-git push origin main && git push origin v3.1.0
+git tag -a v4.1.0 -m "Release v4.1.0: <summary>"
+git push origin main && git push origin v4.1.0
 ```
 GitLab CI creates the release object automatically from the annotated tag message.

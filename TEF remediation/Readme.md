@@ -82,7 +82,7 @@ times are `Europe/Berlin`.
 
 ```
 TEF remediation/
-├── Dockerfile.python                        # Single image for all 4 Cloud Run Jobs; sets HOME=/workspace for non-root gcloud access
+├── Dockerfile.python                        # Single image for all Cloud Run Jobs; sets HOME=/workspace for non-root gcloud access
 ├── entrypoint.sh                            # Routes report type → script; env_drift runs repos in parallel (capped at ENV_DRIFT_MAX_PARALLEL, default 5)
 ├── .gitlab-ci.yml                           # CI: build + Trivy scan + Terraform plan + GitLab release
 ├── .gitignore                               # Excludes tfstate, SA key files, Python artefacts
@@ -127,7 +127,7 @@ TEF remediation/
     ├── BQ variables.tf       # All input variables
     ├── BQ DS + Tables.tf     # Secret Manager, GCS, BigQuery dataset + tables (deletion_protection = true); IAM bindings commented out — managed by TEF IAM Team
     ├── Cloud Run Jobs.tf     # 7 Cloud Run Job resources + 1 on-demand (VPC egress via connector)
-    ├── scheduler.tf          # Daily Cloud Scheduler triggers for the 4 report jobs; IAM binding commented out — managed by TEF IAM Team
+    ├── scheduler.tf          # Daily Cloud Scheduler triggers for all 7 scheduled report jobs; IAM binding commented out — managed by TEF IAM Team
     ├── artifact_registry.tf  # Artifact Registry repo; IAM bindings commented out — managed by TEF IAM Team
     ├── networking.tf         # Data source for the Networking Team's VPC Access Connector (Shared VPC)
     ├── apis.tf               # GCP API enablement (both projects)
