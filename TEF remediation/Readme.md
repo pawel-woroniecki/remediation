@@ -223,6 +223,16 @@ gcloud run jobs execute devops-reports-commit-drift \
 
 ---
 
+## Developer onboarding
+
+New to the codebase? See **[CONTRIBUTING.md](CONTRIBUTING.md)** for:
+- Local Python environment setup and running scripts without Cloud Run
+- `entrypoint.sh` overview and full environment variable reference
+- Step-by-step guide for adding a new report type end-to-end
+- Git / CI workflow, known tech debt, and team contacts
+
+---
+
 ## CI/CD Pipeline (`.gitlab-ci.yml`)
 
 | Stage | Job | Trigger |

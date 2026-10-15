@@ -603,3 +603,23 @@ Suggested charts:
 > The `repository` column is populated automatically by the Cloud Run Job (which runs `generate_dataset_mapping.py` before each compare). When running the script locally with `--no-bq`, pass `--mapping-file dataset_repo_map.json` to populate it.
 
 > "Enable date range parameters" must be **UNCHECKED** on this data source.
+
+---
+
+### 10. `backfill_discrepancy_names.sql`
+
+**Purpose**
+One-time SQL fix applied after commit `309493f`. Renamed abbreviated discrepancy values
+(`prod_not_in_test`, `test_not_in_prod`, `prod_not_in_master`, `master_not_in_prod`) to
+their full branch-name equivalents in `devops_reports.branch_drift_evidence`, so that
+historical rows join correctly with the `file_drift_report` view.
+
+**Status: already applied.** Kept for reference only — safe to re-run (the `WHERE` clause
+only matches the old names and skips already-renamed rows).
+
+**Run (if ever needed again)**
+```bash
+bq query --use_legacy_sql=false \
+  --project_id=tefde-gcp-fastoss-dev \
+  < "TEF remediation/scripts/backfill_discrepancy_names.sql"
+```
