@@ -81,6 +81,15 @@ gcloud scheduler jobs resume devops-reports-orphan-datasets-trigger \
 
 ## 2. Manual runs
 
+### Via GCP Console
+
+1. Open **Cloud Run → Jobs** in the [GCP Console](https://console.cloud.google.com/run/jobs?project=tefde-gcp-fastoss-dev-gke) (project: `tefde-gcp-fastoss-dev-gke`, region: `europe-west3`).
+2. Click the job you want to run (e.g. `devops-reports-commit-drift`).
+3. Click **Execute** in the top toolbar.
+4. Leave all settings at their defaults and click **Execute** again to confirm.
+
+The execution starts within seconds. Switch to the **Executions** tab on the same page to watch progress.
+
 ### Via `gcloud`
 
 ```bash
@@ -95,7 +104,46 @@ permissions — no network restrictions apply.
 
 ---
 
-## 3. Changing the scheduled time
+## 3. Monitoring an execution
+
+After triggering a job by any method, use one of the following to check whether it succeeded.
+
+### Via GCP Console
+
+1. Open **Cloud Run → Jobs** → click the job name.
+2. Click the **Executions** tab.
+3. Each row shows status (`Succeeded` / `Failed`), start time, and duration.
+4. Click any execution row → **Logs** to see live or historical log output.
+
+### Via `gcloud`
+
+```bash
+gcloud run jobs executions list \
+  --job=devops-reports-commit-drift \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --region=europe-west3
+```
+
+To stream logs for the most recent execution:
+
+```bash
+gcloud logging read \
+  'resource.type="cloud_run_job" AND resource.labels.job_name="devops-reports-commit-drift"' \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --limit=50 \
+  --format="value(textPayload)" \
+  --freshness=1h
+```
+
+### Via BigQuery
+
+Once the job finishes, a row appears in the `executions` table (see Section 5 below). A
+`status = success` row confirms the job completed cleanly. A `status = failed` row means at
+least one repo exited with an error — check the logs above for details.
+
+---
+
+## 4. Changing the scheduled time
 
 The schedule is defined in Terraform, in `TEF remediation/Terraform/scheduler.tf`, as a small
 set of constants:
@@ -153,7 +201,7 @@ testing.
 
 ---
 
-## 4. Checking results
+## 5. Checking results
 
 ### BigQuery — execution history
 
@@ -179,7 +227,7 @@ account key is required — Looker Studio uses your own Google identity.
 
 ---
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
