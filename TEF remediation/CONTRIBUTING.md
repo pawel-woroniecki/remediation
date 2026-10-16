@@ -264,7 +264,11 @@ gcloud run jobs executions list \
 ### Most common failure: GitLab PAT expiry
 
 If **all jobs fail simultaneously** with authentication / 401 errors, the GitLab PAT has
-expired. Renew it in GitLab (group → Settings → Access Tokens) and reload it:
+expired. Follow the full step-by-step rotation procedure in
+[`Instructions/Rotating the GitLab PAT.md`](../Instructions/Rotating%20the%20GitLab%20PAT.md).
+
+In brief: create a new Group Access Token in GitLab (`read_api` + `read_repository`
+scopes), load it into Secret Manager, run a test job, then disable the old version:
 
 ```bash
 gcloud secrets versions add gitlab-token \
@@ -272,5 +276,5 @@ gcloud secrets versions add gitlab-token \
   --data-file=- <<< "NEW_PAT_VALUE"
 ```
 
-The PAT requires `read_api` and `read_repository` scopes. Prefer a **Group Access Token**
-over a Personal Access Token so it does not expire when an individual leaves.
+Prefer a **Group Access Token** over a Personal Access Token so it does not expire when
+an individual leaves.

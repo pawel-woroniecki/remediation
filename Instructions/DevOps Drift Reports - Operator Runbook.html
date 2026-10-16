@@ -423,6 +423,7 @@
           </ul>
         </li>
         <li><a href="#problems">Common problems</a></li>
+        <li><a href="#pat-rotation">GitLab PAT rotation</a></li>
         <li><a href="#escalation">Escalation</a></li>
       </ul>
     </div>
@@ -756,7 +757,7 @@ ORDER BY repo;</pre></td></tr>
             </ul>
             <p><strong>Common causes:</strong></p>
             <ul>
-              <li>GitLab token expired → renew in Secret Manager</li>
+              <li>GitLab token expired → see <a href="#pat-rotation">GitLab PAT rotation</a> section</li>
               <li>IAM binding removed → check <code>IAM_admin_instructions.md</code></li>
               <li>BigQuery quota exceeded → check BQ quota dashboard</li>
               <li>Network timeout → job retries once automatically</li>
@@ -835,6 +836,85 @@ ORDER BY repo;</pre></td></tr>
       </div>
     </section>
 
+    <!-- GitLab PAT rotation -->
+    <section class="section" id="pat-rotation">
+      <h2><span class="icon">&#128273;</span>GitLab PAT rotation</h2>
+      <p>
+        The GitLab Personal Access Token (PAT) stored as <code>gitlab-token</code> in Secret Manager is fetched
+        at runtime by every Cloud Run Job to clone repos. When it expires, <strong>all 7 jobs fail simultaneously</strong>
+        with a 401 / authentication error. This section walks through rotating the token end-to-end.
+      </p>
+
+      <div class="callout warn" style="margin-bottom: 20px;">
+        <span class="callout-icon">&#9888;&#65039;</span>
+        <div class="callout-body">
+          <strong>Prefer a Group Access Token over a Personal Access Token.</strong>
+          A Personal Access Token is tied to an individual GitLab account — if that person leaves, the token is
+          revoked automatically and all jobs stop. A Group Access Token belongs to the <code>ndl_core</code> group
+          and survives staff changes. Ask the GitLab group owner to create a Group Access Token if one is not already in use.
+        </div>
+      </div>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 1 — Create a new token in GitLab</h3>
+      <ol style="margin-left: 20px; margin-bottom: 16px;">
+        <li>Open GitLab and navigate to the <strong>ndl_core</strong> group.</li>
+        <li>Go to <strong>Settings → Access Tokens</strong>.</li>
+        <li>Click <strong>Add new token</strong> (or <strong>Create group access token</strong>).</li>
+        <li>Set a descriptive name, e.g. <code>devops-reports-runner</code>.</li>
+        <li>Set an expiry date at least 12 months out. Note it in your team calendar so rotation is planned, not reactive.</li>
+        <li>Select <strong>exactly these two scopes</strong>: <code>read_api</code> and <code>read_repository</code>. No other scopes are needed.</li>
+        <li>Click <strong>Create</strong> and <strong>copy the token value immediately</strong> — GitLab shows it only once.</li>
+      </ol>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 2 — Load the new token into Secret Manager</h3>
+      <p style="margin-bottom: 8px;">Run this command from any terminal with <code>gcloud</code> access and the <code>secretmanager.versions.add</code> permission:</p>
+      <pre style="background:var(--grey-bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;font-family:var(--font-mono);font-size:13px;overflow-x:auto;margin-bottom:16px;">gcloud secrets versions add gitlab-token \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --data-file=- &lt;&lt;&lt; "PASTE_NEW_TOKEN_HERE"</pre>
+      <p style="margin-bottom: 8px;">Verify the new version is now the <code>ENABLED</code> latest version:</p>
+      <pre style="background:var(--grey-bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;font-family:var(--font-mono);font-size:13px;overflow-x:auto;margin-bottom:16px;">gcloud secrets versions list gitlab-token \
+  --project=tefde-gcp-fastoss-dev-gke</pre>
+      <p style="margin-bottom: 16px;">The newest version should show <code>STATE: ENABLED</code>. The Cloud Run Jobs always fetch the <em>latest</em> version automatically — no Terraform or Cloud Run configuration change is needed.</p>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 3 — Verify with a test run</h3>
+      <p style="margin-bottom: 8px;">Trigger the lightest job to confirm the new token works before the next scheduled run:</p>
+      <pre style="background:var(--grey-bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;font-family:var(--font-mono);font-size:13px;overflow-x:auto;margin-bottom:16px;">gcloud run jobs execute devops-reports-orphan-datasets \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --region=europe-west3</pre>
+      <p style="margin-bottom: 16px;">Wait ~5 minutes, then check Cloud Run → Jobs → <code>devops-reports-orphan-datasets</code> → Executions. Status should be <code>Succeeded</code>. If it still fails with an authentication error, double-check the token was copied correctly (no trailing newline or whitespace).</p>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 4 — Disable the old token version (optional but recommended)</h3>
+      <p style="margin-bottom: 8px;">Once the test run succeeds, disable the previous secret version to prevent accidental use:</p>
+      <pre style="background:var(--grey-bg);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;font-family:var(--font-mono);font-size:13px;overflow-x:auto;margin-bottom:16px;"># Replace N with the old version number shown in step 2
+gcloud secrets versions disable N \
+  --secret=gitlab-token \
+  --project=tefde-gcp-fastoss-dev-gke</pre>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 5 — Notify the team</h3>
+      <ul style="margin-left: 20px; margin-bottom: 16px;">
+        <li>Inform the DevOps platform team that the token was rotated and jobs are healthy again.</li>
+        <li>If the old token in GitLab still exists, revoke it there too (GitLab group → Settings → Access Tokens → Revoke).</li>
+        <li>Add a reminder in your team calendar for the new expiry date, at least 2 weeks before — plan the next rotation before it becomes an incident.</li>
+      </ul>
+
+      <div class="callout success">
+        <span class="callout-icon">&#9989;</span>
+        <div class="callout-body">
+          <strong>Full rotation checklist</strong>
+          <p>&#9744; New token created in GitLab with <code>read_api</code> + <code>read_repository</code> scopes &nbsp;|&nbsp;
+             &#9744; New version added to <code>gitlab-token</code> in Secret Manager &nbsp;|&nbsp;
+             &#9744; Test run succeeded &nbsp;|&nbsp;
+             &#9744; Old secret version disabled &nbsp;|&nbsp;
+             &#9744; Old GitLab token revoked &nbsp;|&nbsp;
+             &#9744; Team notified &nbsp;|&nbsp;
+             &#9744; Next-expiry reminder added to calendar</p>
+        </div>
+      </div>
+
+      <p style="margin-top: 16px;">For the full background on why the PAT is stored in Secret Manager and the scope requirements, see
+        <a href="Rotating the GitLab PAT.md">Rotating the GitLab PAT.md</a>.</p>
+    </section>
+
     <!-- Escalation -->
     <section class="section" id="escalation">
       <h2><span class="icon">&#128222;</span>Escalation contacts</h2>
@@ -859,7 +939,7 @@ ORDER BY repo;</pre></td></tr>
         </div>
         <div class="esc-item">
           <strong>&#9888;&#65039; GitLab token expired</strong>
-          <p>Request a new token from the GitLab group owner and update it in <strong>Secret Manager</strong> (<code>gitlab-token</code> in <code>tefde-gcp-fastoss-dev-gke</code>). Inform the DevOps platform team.</p>
+          <p>Follow the step-by-step procedure in the <a href="#pat-rotation">GitLab PAT rotation</a> section above. In short: create a new Group Access Token in GitLab (<code>read_api</code> + <code>read_repository</code>), load it into Secret Manager, run a test job, and notify the DevOps platform team.</p>
         </div>
         <div class="esc-item">
           <strong>&#128203; IAM grant missing</strong>
