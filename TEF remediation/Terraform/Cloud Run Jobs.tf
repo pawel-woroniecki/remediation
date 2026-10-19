@@ -49,10 +49,11 @@ resource "google_cloud_run_v2_job" "orphan_datasets" {
 
         args = [
           "orphan_datasets",
-          "--project-id",        var.bq_scan_project_id,
-          "--gcp-project",       var.project_id,
-          "--reporting-project", var.reporting_project_id,
-          "--gcs-bucket",        var.reports_gcs_bucket,
+          "--project-id",              var.bq_scan_project_id,
+          "--gcp-project",             var.project_id,
+          "--reporting-project",       var.reporting_project_id,
+          "--gcs-bucket",              var.reports_gcs_bucket,
+          "--dataset-exclude-regex",   "^_|^demo",
         ]
 
         env {
@@ -508,8 +509,9 @@ resource "google_cloud_run_v2_job" "bq_structure" {
 
         args = [
           "bq_structure",
-          "--reporting-project", var.reporting_project_id,
-          "--envs",              "prod,test,dev-gke",
+          "--reporting-project",       var.reporting_project_id,
+          "--envs",                    "prod,test,dev-gke",
+          "--exclude-dataset-regex",   "^demo",
         ]
 
         env {

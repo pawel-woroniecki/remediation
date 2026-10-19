@@ -143,6 +143,7 @@ def fetch_env(
     env: str,
     project: str,
     only_datasets: list[str],
+    exclude_regex: "re.Pattern | None" = None,
 ) -> dict[tuple[str, str], TableMeta]:
     """Return {(dataset_id, table_id): TableMeta} for one GCP project."""
     client = bigquery.Client(project=project)
@@ -152,6 +153,8 @@ def fetch_env(
     if only_datasets:
         ds_set = set(only_datasets)
         all_ds = [d for d in all_ds if d.dataset_id in ds_set]
+    if exclude_regex:
+        all_ds = [d for d in all_ds if not exclude_regex.search(d.dataset_id)]
 
     for ds_item in all_ds:
         ds_id = ds_item.dataset_id
@@ -378,6 +381,11 @@ def main() -> None:
         help="Only compare this dataset. Repeatable. (default: all datasets)",
     )
     parser.add_argument(
+        "--exclude-dataset-regex", default="",
+        help="Skip datasets whose ID matches this regex (default: none). "
+             "Example: '^demo' excludes all datasets starting with 'demo'.",
+    )
+    parser.add_argument(
         "--reporting-project", default=REPORTING_PROJECT_DEFAULT,
         help=f"Project holding devops_reports (default: {REPORTING_PROJECT_DEFAULT})",
     )
@@ -409,6 +417,7 @@ def main() -> None:
 
     prod_env      = envs[0]   # first env is the reference (source of truth)
     only_datasets = args.datasets or []
+    exclude_regex = re.compile(args.exclude_dataset_regex) if args.exclude_dataset_regex else None
     checked_at    = datetime.now(timezone.utc)
     run_id        = checked_at.strftime("%Y%m%dT%H%M%SZ")
 
@@ -437,7 +446,7 @@ def main() -> None:
         env_data: dict[str, dict[tuple[str, str], TableMeta]] = {}
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
             futures = {
-                pool.submit(fetch_env, e, ENV_TO_PROJECT[e], only_datasets): e
+                pool.submit(fetch_env, e, ENV_TO_PROJECT[e], only_datasets, exclude_regex): e
                 for e in envs
             }
             for fut in as_completed(futures):
