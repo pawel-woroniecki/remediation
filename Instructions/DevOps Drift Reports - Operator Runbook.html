@@ -841,90 +841,160 @@ ORDER BY repo;</pre></td></tr>
     <!-- Branch back-merge -->
     <section class="section" id="branch-backmerge">
       <h2><span class="icon">&#128256;</span>Branch back-merge — resolving persistent file drift</h2>
-      <p>
-        The file drift report uses <strong>merge-base comparison</strong>: it diffs from the common ancestor
-        of two branches to the right-branch tip. This means a file added directly to <code>production</code>
-        (without going through <code>master</code> first) keeps appearing as <em>added</em> even after the
-        same file reaches <code>master</code> through another route — because the <strong>merge base</strong>
-        (the shared ancestor) has not moved forward.
+
+      <h3 style="margin: 0 0 10px; font-size: 15px; color: var(--navy);">Branch promotion model</h3>
+      <p style="margin-bottom: 12px;">
+        The standard development flow in this environment is:
       </p>
-      <p style="margin-top: 8px;">
-        The finding disappears only when the branches are formally re-synced via a merge commit, which
-        advances the merge base past the point where the files were added.
+      <div style="background:var(--grey-bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;font-family:var(--font-mono);font-size:13px;margin-bottom:16px;text-align:center;">
+        feature branch &nbsp;&#8594;&nbsp; <strong>master</strong> &nbsp;&#8594;&nbsp; <strong>test</strong> &nbsp;&#8594;&nbsp; <strong>production</strong>
+      </div>
+      <p style="margin-bottom: 8px;">
+        <strong>master</strong> is the primary integration branch where all developer work lands first.
+        <strong>test</strong> and <strong>production</strong> only receive changes that have been
+        reviewed and promoted from the branch before them — developers do not commit directly to
+        <code>test</code> or <code>production</code>.
       </p>
 
-      <div class="callout warn" style="margin: 16px 0;">
-        <span class="callout-icon">&#9888;&#65039;</span>
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Why file drift appears — and why it is serious</h3>
+      <p style="margin-bottom: 8px;">
+        The file drift report uses <strong>merge-base comparison</strong>: for each branch pair it diffs
+        from their common ancestor to the right-branch tip. A finding of <em>"production differs from master"</em>
+        means production contains a change that was never formally introduced through
+        <code>master → test → production</code>.
+      </p>
+      <p style="margin-bottom: 8px;">
+        In this branching model that situation arises from <strong>emergency hotfixes applied directly to
+        <code>production</code></strong> (or <code>test</code>). While the fix solves an immediate problem,
+        it creates a hidden risk:
+      </p>
+
+      <div class="callout" style="background:var(--red-light);border-left:4px solid var(--red);margin:12px 0 16px;">
+        <span class="callout-icon">&#128680;</span>
         <div class="callout-body">
-          <strong>Before merging: confirm the file contents are intentionally the same in both branches.</strong>
-          <p>If the file in <code>production</code> and the file in <code>master</code> differ, a back-merge
-          will produce a conflict or silently pick one version. Review the diff in GitLab first.</p>
+          <strong>The hotfix will be lost on the next normal deployment.</strong>
+          <p>If the fix exists only in <code>production</code> and the team then promotes
+          <code>master → test → production</code> in the normal way, the merge from <code>test</code>
+          into <code>production</code> will <strong>overwrite the fix</strong> — because <code>test</code>
+          does not contain it. The bug reappears in production silently.</p>
+          <p style="margin-top:6px;">The drift report is the early warning that this risk exists. The fix must be
+          back-merged all the way to <code>master</code> before the next normal deployment is made.</p>
         </div>
       </div>
 
-      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 1 — Confirm the drift is acknowledged</h3>
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">The two-step back-merge</h3>
+      <p style="margin-bottom: 8px;">
+        Because the promotion chain is <code>master → test → production</code>, a hotfix applied to
+        <code>production</code> must travel back through <strong>both</strong> intermediate branches:
+      </p>
+      <div style="background:var(--grey-bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;font-family:var(--font-mono);font-size:13px;margin-bottom:16px;text-align:center;">
+        production &nbsp;&#8594;&nbsp; <strong>test</strong> &nbsp;&#8594;&nbsp; <strong>master</strong>
+      </div>
+      <p style="margin-bottom: 12px;">
+        Merging only to <code>master</code> and skipping <code>test</code> leaves <code>test</code>
+        without the fix — it will be overwritten the moment a developer promotes from
+        <code>master</code> to <code>test</code>.
+      </p>
+
+      <div class="callout warn" style="margin-bottom: 16px;">
+        <span class="callout-icon">&#9888;&#65039;</span>
+        <div class="callout-body">
+          <strong>Urgency: do the back-merge before the next deployment.</strong>
+          <p>As long as the fix exists only in <code>production</code>, every normal feature deployment
+          is a risk. Do not wait for the next sprint or daily report cycle — start the back-merge MRs
+          the same day the hotfix is applied.</p>
+        </div>
+      </div>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 1 — Confirm the hotfix with the DEV team</h3>
       <ol style="margin-left: 20px; margin-bottom: 16px;">
-        <li>Open the File Content Drift dashboard and note the repo name, drift direction, and list of affected files.</li>
-        <li>Check with the DEV team owning the repo: are all listed files intentionally in both branches? If any file should <em>not</em> be in <code>production</code>, stop — do not merge, investigate first.</li>
+        <li>Open the File Content Drift (or Commit Drift) dashboard and note the repo name, direction, and affected files.</li>
+        <li>Confirm with the DEV lead: which commit or change triggered the drift? Is this an acknowledged hotfix?</li>
+        <li>If the change was unintentional or its origin is unknown, <strong>stop — do not merge</strong>. Investigate and escalate to the DEV lead before proceeding.</li>
       </ol>
 
-      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 2 — Review the diff in GitLab before merging</h3>
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 2 — Back-merge production → test</h3>
       <ol style="margin-left: 20px; margin-bottom: 16px;">
-        <li>Open the repo in GitLab (e.g. <code>FastOSS_B / ndl_core / inventory_ran</code>).</li>
-        <li>Go to <strong>Repository → Compare</strong> (or <strong>Merge Requests → New merge request</strong>).</li>
-        <li>Set <strong>Source</strong> = <code>production</code>, <strong>Target</strong> = <code>master</code>.</li>
-        <li>Review the diff. All changes should be the acknowledged files and nothing unexpected.</li>
+        <li>In GitLab, open the affected repo.</li>
+        <li>Go to <strong>Merge Requests → New merge request</strong>.</li>
+        <li>Set <strong>Source branch</strong> = <code>production</code>, <strong>Target branch</strong> = <code>test</code>.</li>
+        <li>Review the diff carefully — it should contain only the hotfix files. If unrelated changes appear, contact the DEV lead before continuing.</li>
+        <li>Title the MR: <em>"Back-merge: hotfix production → test [date / brief description]"</em>.</li>
+        <li>In the MR description, state clearly: the hotfix being merged, why it was applied directly to production, and that a second MR (<code>test → master</code>) will follow.</li>
+        <li>Set merge method to <strong>Merge commit</strong> (never squash — see warning below).</li>
+        <li>Assign to the DEV lead for approval. Merge once approved.</li>
       </ol>
 
-      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 3 — Create the back-merge MR</h3>
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 3 — Back-merge test → master</h3>
       <ol style="margin-left: 20px; margin-bottom: 16px;">
-        <li>Click <strong>Create merge request</strong>.</li>
-        <li>Title it clearly, e.g. <em>"Back-merge: sync production → master (acknowledged file drift)"</em>.</li>
-        <li>In the description, list the files being merged and reference the drift report date.</li>
-        <li>Set <strong>Merge method</strong> to <strong>Merge commit</strong> (not squash — a squash merge creates a new commit SHA that will itself appear as drift).</li>
-        <li>Assign to the repo's DEV lead for approval.</li>
-      </ol>
-
-      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 4 — Merge and verify</h3>
-      <ol style="margin-left: 20px; margin-bottom: 16px;">
-        <li>Once approved, merge the MR. GitLab creates a merge commit on <code>master</code>.</li>
-        <li>The new merge commit becomes the new merge base between <code>production</code> and <code>master</code>.</li>
-        <li>Wait for the next scheduled file drift run (daily at 05:30 Europe/Berlin) or trigger a manual run:
-          <pre style="background:var(--grey-bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;font-family:var(--font-mono);font-size:13px;margin-top:8px;">gcloud run jobs execute devops-reports-file-drift \
-  --project=tefde-gcp-fastoss-dev-gke \
-  --region=europe-west3</pre>
-        </li>
-        <li>Check the File Content Drift dashboard — the affected files should no longer appear for that repo and direction.</li>
+        <li>Immediately after the <code>production → test</code> MR is merged, create a second MR.</li>
+        <li>Set <strong>Source branch</strong> = <code>test</code>, <strong>Target branch</strong> = <code>master</code>.</li>
+        <li>Review the diff — it should now contain only the hotfix (since test just received it from production).</li>
+        <li>Title: <em>"Back-merge: hotfix test → master [date / brief description]"</em>.</li>
+        <li>Set merge method to <strong>Merge commit</strong>. Assign and merge once approved.</li>
       </ol>
 
       <div class="callout warn" style="margin-bottom: 16px;">
         <span class="callout-icon">&#9888;&#65039;</span>
         <div class="callout-body">
-          <strong>Do not use squash merge.</strong>
-          <p>A squash merge creates a brand-new commit SHA on master that does not exist in production.
-          This makes the squash commit immediately appear as <em>master not in production</em> drift in the
-          commit drift report — replacing one drift finding with another. Always use a regular merge commit.</p>
+          <strong>Never use squash merge for back-merges.</strong>
+          <p>A squash merge creates a brand-new commit SHA that does not exist in the source branch.
+          This makes the squash commit immediately appear as new drift in the <em>opposite</em> direction
+          (e.g. <em>master not in production</em>) — replacing one drift finding with another.
+          Always use a regular <strong>merge commit</strong>.</p>
         </div>
       </div>
 
-      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Going forward — prevent direct commits to production</h3>
-      <p style="margin-bottom: 8px;">The root cause is files being committed directly to <code>production</code> without going through
-      <code>master → test → production</code>. To prevent recurrence:</p>
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 4 — Verify the drift is resolved</h3>
+      <ol style="margin-left: 20px; margin-bottom: 16px;">
+        <li>Both MRs are merged. All three branches now share the hotfix.</li>
+        <li>Trigger a manual drift run to confirm immediately rather than waiting until 05:30:
+          <pre style="background:var(--grey-bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;font-family:var(--font-mono);font-size:13px;margin-top:8px;">gcloud run jobs execute devops-reports-file-drift \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --region=europe-west3</pre>
+        </li>
+        <li>Check the File Content Drift and Commit Drift dashboards — findings for the affected repo and directions should be gone.</li>
+        <li>Confirm that the next planned normal deployment (<code>master → test → production</code>) is safe: <code>master</code> now contains the hotfix, so it will not be overwritten.</li>
+      </ol>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Correct hotfix process going forward</h3>
+      <p style="margin-bottom: 8px;">
+        The safest approach for urgent fixes avoids the back-merge problem entirely:
+      </p>
+      <ol style="margin-left: 20px; margin-bottom: 16px;">
+        <li>Create a <strong>hotfix branch from <code>production</code></strong> (not from master).</li>
+        <li>Apply the fix on the hotfix branch.</li>
+        <li>Open <strong>two MRs simultaneously</strong>: hotfix → <code>production</code> <em>and</em> hotfix → <code>master</code>.</li>
+        <li>Merge both. <code>production</code> gets the fix immediately; <code>master</code> gets it at the same time — no drift, no back-merge needed.</li>
+        <li>On the next normal cycle, <code>master → test → production</code> will include the fix cleanly.</li>
+      </ol>
+      <p style="margin-bottom: 16px;">
+        This is the standard <strong>Git Flow hotfix pattern</strong>. The drift report will show zero findings
+        because production and master received the same commit through parallel MRs.
+      </p>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Protecting branches to enforce the flow</h3>
+      <p style="margin-bottom: 8px;">To prevent accidental direct commits to <code>test</code> or <code>production</code>:</p>
       <ul style="margin-left: 20px; margin-bottom: 16px;">
-        <li>Ask the GitLab group owner to enable <strong>protected branches</strong> on <code>production</code> for the affected repo: <strong>Settings → Repository → Protected branches → allow merge only from Maintainers, disallow direct push for Developers</strong>.</li>
-        <li>Enforce merge requests for all changes to <code>production</code> — no force-pushes, no direct commits.</li>
+        <li>Ask the GitLab group owner to set <strong>protected branches</strong> on <code>production</code> and <code>test</code>:
+          <strong>Settings → Repository → Protected branches → allow merge only from Maintainers, disallow direct push for all roles</strong>.</li>
+        <li>Require at least one approval on MRs targeting <code>production</code> and <code>test</code>.</li>
+        <li>Consider requiring that <code>test</code> is only merged from <code>master</code>, and <code>production</code> only from <code>test</code> — GitLab does not enforce this automatically but it can be documented as a team rule.</li>
       </ul>
 
       <div class="callout success">
         <span class="callout-icon">&#9989;</span>
         <div class="callout-body">
           <strong>Resolution checklist</strong>
-          <p>&#9744; Affected files confirmed as intentional with DEV team &nbsp;|&nbsp;
-             &#9744; GitLab diff reviewed — no unexpected changes &nbsp;|&nbsp;
-             &#9744; Back-merge MR created with merge commit (not squash) &nbsp;|&nbsp;
-             &#9744; MR approved and merged &nbsp;|&nbsp;
-             &#9744; Next file drift run shows no findings for affected repo/direction &nbsp;|&nbsp;
-             &#9744; Protected branch rules reviewed to prevent recurrence</p>
+          <p>
+            &#9744; Hotfix confirmed and documented with DEV lead &nbsp;|&nbsp;
+            &#9744; Back-merge MR 1: <code>production → test</code> — merge commit, approved, merged &nbsp;|&nbsp;
+            &#9744; Back-merge MR 2: <code>test → master</code> — merge commit, approved, merged &nbsp;|&nbsp;
+            &#9744; File drift run triggered and shows zero findings for affected directions &nbsp;|&nbsp;
+            &#9744; Confirmed: next normal deployment (<code>master → test → production</code>) is safe &nbsp;|&nbsp;
+            &#9744; Team reminded to use parallel hotfix MRs going forward &nbsp;|&nbsp;
+            &#9744; Protected branch rules reviewed
+          </p>
         </div>
       </div>
     </section>
