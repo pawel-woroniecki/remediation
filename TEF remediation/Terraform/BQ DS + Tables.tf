@@ -714,7 +714,7 @@ resource "google_bigquery_table" "orphan_dataset_objects" {
 # Looker Studio view — commit drift detail report
 # ---------------------------------------------------------------------------
 # One row per repo × drift direction × run (last 90 days).
-# run_number: 1 = latest run for run_date, 2 = previous, etc.
+# run_number: 1 = earliest run for run_date, 2 = next, etc.
 # In Looker Studio connect to this view directly; add Filter Controls on
 # run_date (date picker) and run_number (dropdown) to select a specific run.
 resource "google_bigquery_table" "commit_drift_report" {
@@ -732,7 +732,7 @@ resource "google_bigquery_table" "commit_drift_report" {
           DATE(execution_ts, 'Europe/Berlin')             AS run_date,
           ROW_NUMBER() OVER (
             PARTITION BY DATE(execution_ts, 'Europe/Berlin')
-            ORDER BY execution_ts DESC
+            ORDER BY execution_ts ASC
           )                                               AS run_number,
           environment,
           status,
@@ -851,7 +851,7 @@ resource "google_bigquery_table" "commit_drift_evidence_report" {
           DATE(execution_ts, 'Europe/Berlin')             AS run_date,
           ROW_NUMBER() OVER (
             PARTITION BY DATE(execution_ts, 'Europe/Berlin')
-            ORDER BY execution_ts DESC
+            ORDER BY execution_ts ASC
           )                                               AS run_number
         FROM `${var.reporting_project_id}.devops_reports.executions`
         WHERE report_type = 'commit_drift'
@@ -913,7 +913,7 @@ resource "google_bigquery_table" "commit_drift_evidence_report" {
 # Looker Studio view — file drift detail report
 # ---------------------------------------------------------------------------
 # One row per repo × drift direction × run (last 90 days).
-# run_number: 1 = latest run for run_date, 2 = previous, etc.
+# run_number: 1 = earliest run for run_date, 2 = next, etc.
 # In Looker Studio connect to this view directly; add Filter Controls on
 # run_date (date picker) and run_number (dropdown) to select a specific run.
 resource "google_bigquery_table" "file_drift_report" {
@@ -931,7 +931,7 @@ resource "google_bigquery_table" "file_drift_report" {
           DATE(execution_ts, 'Europe/Berlin')             AS run_date,
           ROW_NUMBER() OVER (
             PARTITION BY DATE(execution_ts, 'Europe/Berlin')
-            ORDER BY execution_ts DESC
+            ORDER BY execution_ts ASC
           )                                               AS run_number,
           environment,
           status,
@@ -1049,7 +1049,7 @@ resource "google_bigquery_table" "file_drift_evidence_report" {
           DATE(execution_ts, 'Europe/Berlin') AS run_date,
           ROW_NUMBER() OVER (
             PARTITION BY DATE(execution_ts, 'Europe/Berlin')
-            ORDER BY execution_ts DESC
+            ORDER BY execution_ts ASC
           )                                   AS run_number,
           environment,
           triggered_by
