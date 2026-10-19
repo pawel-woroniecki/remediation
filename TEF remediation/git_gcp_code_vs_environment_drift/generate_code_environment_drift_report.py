@@ -151,6 +151,10 @@ def _strip_outer_parens(sql: str) -> str:
 
 def strip_create_as_header(sql: str) -> str:
     """Remove CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE ... AS header, leaving the body."""
+    # Remove preamble/metadata statements that don't contribute to the view body so that
+    # _CREATE_AS_HEADER_RE can match from the ^ anchor without obstruction.
+    sql = _CREATE_SCHEMA_RE.sub("", sql)
+    sql = _ALTER_SET_OPTIONS_RE.sub("", sql)
     body = _CREATE_AS_HEADER_RE.sub("", sql, count=1).strip()
     body = body.rstrip(";").strip()
     return _strip_outer_parens(body)
@@ -348,6 +352,24 @@ def apply_substitutions(snapshot_dir: Path, replacements: dict[str, str]) -> Non
             if content != original:
                 file_path.write_text(content, encoding="utf-8")
 
+
+# Strips CREATE SCHEMA [IF NOT EXISTS] <name> [OPTIONS (...)]; preamble statements.
+# Many DDL files start with this to ensure the dataset exists before creating the view.
+# The ^ anchor in _CREATE_AS_HEADER_RE cannot skip past these, so they must be removed first.
+_CREATE_SCHEMA_RE = re.compile(
+    r"create\s+schema\b[^;]*;",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Strips ALTER VIEW|TABLE <name> SET OPTIONS (...); statements.
+# These are metadata-only changes (labels, descriptions) that don't modify the view body.
+# They appear in companion *_v2.sql files and get concatenated into sql_fragments; leaving
+# them in causes the source body to differ from the GCP view_query body even when the
+# actual query logic is identical.
+_ALTER_SET_OPTIONS_RE = re.compile(
+    r"alter\s+(?:view|table)\b[^;]*\bset\s+options\b[^;]*;?",
+    re.IGNORECASE | re.DOTALL,
+)
 
 # Strips the full CREATE [OR REPLACE] [MATERIALIZED] VIEW|TABLE … AS header,
 # including optional column-description blocks, OPTIONS clauses, and IF NOT EXISTS.
