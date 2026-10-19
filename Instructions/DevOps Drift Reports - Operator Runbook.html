@@ -423,6 +423,7 @@
           </ul>
         </li>
         <li><a href="#problems">Common problems</a></li>
+        <li><a href="#branch-backmerge">Branch back-merge</a></li>
         <li><a href="#pat-rotation">GitLab PAT rotation</a></li>
         <li><a href="#escalation">Escalation</a></li>
       </ul>
@@ -685,6 +686,7 @@ ORDER BY repo;</pre></td></tr>
               <tr class="sig-amber"><td>Large <code>files_modified</code> count with low commit drift</td><td><span class="pill amber">&#9888;&#65039; Investigate</span></td><td>Files differ but there are few or no commits explaining the difference. Could indicate a force-push or rebase that rewrote history. Correlate with commit drift for the same repo and direction.</td></tr>
               <tr class="sig-amber"><td>High <code>unique_files</code> count increasing day-over-day</td><td><span class="pill amber">&#9888;&#65039; Monitor</span></td><td>File divergence is growing, suggesting an active branch that is not being merged back. Alert the repo owner.</td></tr>
               <tr class="sig-green"><td>Low <code>unique_files</code> count, all in <code>master not in production</code></td><td><span class="pill green">&#10003; Normal</span></td><td>Pending release. No action needed.</td></tr>
+              <tr class="sig-amber"><td>Findings persist day-after-day even though files exist in both branches</td><td><span class="pill amber">&#9888;&#65039; Acknowledged drift</span></td><td>The report uses merge-base comparison — findings show what production changed since the last shared commit, not what is currently different. Files added directly to production keep appearing until the branches are formally re-synced. See the <a href="#branch-backmerge">Branch back-merge</a> section for the step-by-step resolution procedure.</td></tr>
             </tbody>
           </table></div>
         </div>
@@ -832,6 +834,97 @@ ORDER BY repo;</pre></td></tr>
             </ul>
             <p><strong>Action:</strong> Open the detailed dashboard for the relevant report type and filter to the specific repo and date.</p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Branch back-merge -->
+    <section class="section" id="branch-backmerge">
+      <h2><span class="icon">&#128256;</span>Branch back-merge — resolving persistent file drift</h2>
+      <p>
+        The file drift report uses <strong>merge-base comparison</strong>: it diffs from the common ancestor
+        of two branches to the right-branch tip. This means a file added directly to <code>production</code>
+        (without going through <code>master</code> first) keeps appearing as <em>added</em> even after the
+        same file reaches <code>master</code> through another route — because the <strong>merge base</strong>
+        (the shared ancestor) has not moved forward.
+      </p>
+      <p style="margin-top: 8px;">
+        The finding disappears only when the branches are formally re-synced via a merge commit, which
+        advances the merge base past the point where the files were added.
+      </p>
+
+      <div class="callout warn" style="margin: 16px 0;">
+        <span class="callout-icon">&#9888;&#65039;</span>
+        <div class="callout-body">
+          <strong>Before merging: confirm the file contents are intentionally the same in both branches.</strong>
+          <p>If the file in <code>production</code> and the file in <code>master</code> differ, a back-merge
+          will produce a conflict or silently pick one version. Review the diff in GitLab first.</p>
+        </div>
+      </div>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 1 — Confirm the drift is acknowledged</h3>
+      <ol style="margin-left: 20px; margin-bottom: 16px;">
+        <li>Open the File Content Drift dashboard and note the repo name, drift direction, and list of affected files.</li>
+        <li>Check with the DEV team owning the repo: are all listed files intentionally in both branches? If any file should <em>not</em> be in <code>production</code>, stop — do not merge, investigate first.</li>
+      </ol>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 2 — Review the diff in GitLab before merging</h3>
+      <ol style="margin-left: 20px; margin-bottom: 16px;">
+        <li>Open the repo in GitLab (e.g. <code>FastOSS_B / ndl_core / inventory_ran</code>).</li>
+        <li>Go to <strong>Repository → Compare</strong> (or <strong>Merge Requests → New merge request</strong>).</li>
+        <li>Set <strong>Source</strong> = <code>production</code>, <strong>Target</strong> = <code>master</code>.</li>
+        <li>Review the diff. All changes should be the acknowledged files and nothing unexpected.</li>
+      </ol>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 3 — Create the back-merge MR</h3>
+      <ol style="margin-left: 20px; margin-bottom: 16px;">
+        <li>Click <strong>Create merge request</strong>.</li>
+        <li>Title it clearly, e.g. <em>"Back-merge: sync production → master (acknowledged file drift)"</em>.</li>
+        <li>In the description, list the files being merged and reference the drift report date.</li>
+        <li>Set <strong>Merge method</strong> to <strong>Merge commit</strong> (not squash — a squash merge creates a new commit SHA that will itself appear as drift).</li>
+        <li>Assign to the repo's DEV lead for approval.</li>
+      </ol>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Step 4 — Merge and verify</h3>
+      <ol style="margin-left: 20px; margin-bottom: 16px;">
+        <li>Once approved, merge the MR. GitLab creates a merge commit on <code>master</code>.</li>
+        <li>The new merge commit becomes the new merge base between <code>production</code> and <code>master</code>.</li>
+        <li>Wait for the next scheduled file drift run (daily at 05:30 Europe/Berlin) or trigger a manual run:
+          <pre style="background:var(--grey-bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;font-family:var(--font-mono);font-size:13px;margin-top:8px;">gcloud run jobs execute devops-reports-file-drift \
+  --project=tefde-gcp-fastoss-dev-gke \
+  --region=europe-west3</pre>
+        </li>
+        <li>Check the File Content Drift dashboard — the affected files should no longer appear for that repo and direction.</li>
+      </ol>
+
+      <div class="callout warn" style="margin-bottom: 16px;">
+        <span class="callout-icon">&#9888;&#65039;</span>
+        <div class="callout-body">
+          <strong>Do not use squash merge.</strong>
+          <p>A squash merge creates a brand-new commit SHA on master that does not exist in production.
+          This makes the squash commit immediately appear as <em>master not in production</em> drift in the
+          commit drift report — replacing one drift finding with another. Always use a regular merge commit.</p>
+        </div>
+      </div>
+
+      <h3 style="margin: 20px 0 10px; font-size: 15px; color: var(--navy);">Going forward — prevent direct commits to production</h3>
+      <p style="margin-bottom: 8px;">The root cause is files being committed directly to <code>production</code> without going through
+      <code>master → test → production</code>. To prevent recurrence:</p>
+      <ul style="margin-left: 20px; margin-bottom: 16px;">
+        <li>Ask the GitLab group owner to enable <strong>protected branches</strong> on <code>production</code> for the affected repo: <strong>Settings → Repository → Protected branches → allow merge only from Maintainers, disallow direct push for Developers</strong>.</li>
+        <li>Enforce merge requests for all changes to <code>production</code> — no force-pushes, no direct commits.</li>
+      </ul>
+
+      <div class="callout success">
+        <span class="callout-icon">&#9989;</span>
+        <div class="callout-body">
+          <strong>Resolution checklist</strong>
+          <p>&#9744; Affected files confirmed as intentional with DEV team &nbsp;|&nbsp;
+             &#9744; GitLab diff reviewed — no unexpected changes &nbsp;|&nbsp;
+             &#9744; Back-merge MR created with merge commit (not squash) &nbsp;|&nbsp;
+             &#9744; MR approved and merged &nbsp;|&nbsp;
+             &#9744; Next file drift run shows no findings for affected repo/direction &nbsp;|&nbsp;
+             &#9744; Protected branch rules reviewed to prevent recurrence</p>
         </div>
       </div>
     </section>
