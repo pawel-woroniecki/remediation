@@ -373,6 +373,7 @@ resource "google_bigquery_table" "env_drift_summary" {
         JOIN `${var.reporting_project_id}.devops_reports.env_drift_findings` f
           USING (execution_id)
         WHERE e.report_type = 'env_drift'
+          AND f.product NOT LIKE 'demo_%'
         GROUP BY
           e.execution_id, COALESCE(e.environment, 'prod'), f.product, e.execution_ts
       )
@@ -602,6 +603,7 @@ resource "google_bigquery_table" "management_dashboard" {
           AND COALESCE(e.environment, 'prod') = 'prod'
           AND COALESCE(e.project_name, f.product) IS NOT NULL
           AND e.project_name != '_job_summary'
+          AND COALESCE(e.project_name, f.product) NOT LIKE 'demo_%'
         GROUP BY e.execution_id, COALESCE(e.project_name, f.product), DATE(e.execution_ts), e.execution_ts
       ),
 
@@ -634,6 +636,7 @@ resource "google_bigquery_table" "management_dashboard" {
           USING (execution_id)
         WHERE e.report_type = 'commit_drift'
           AND k.drift_type = 'commit'
+          AND k.repo NOT LIKE 'demo_%'
         GROUP BY k.repo, k.run_date, k.execution_id, e.execution_ts
         QUALIFY ROW_NUMBER() OVER (
           PARTITION BY k.repo, k.run_date ORDER BY e.execution_ts DESC
@@ -661,6 +664,7 @@ resource "google_bigquery_table" "management_dashboard" {
           USING (execution_id)
         WHERE e.report_type = 'file_drift'
           AND k.drift_type = 'content'
+          AND k.repo NOT LIKE 'demo_%'
         GROUP BY k.repo, k.run_date, k.execution_id, e.execution_ts
         QUALIFY ROW_NUMBER() OVER (
           PARTITION BY k.repo, k.run_date ORDER BY e.execution_ts DESC
@@ -779,6 +783,7 @@ resource "google_bigquery_table" "commit_drift_report" {
         JOIN latest_exec e USING (execution_id)
         WHERE k.drift_type = 'commit'
           AND k.status     = 'ok'
+          AND k.repo NOT LIKE 'demo_%'
       ),
 
       evidence_agg AS (
@@ -903,6 +908,7 @@ resource "google_bigquery_table" "commit_drift_evidence_report" {
                    AND k.repo         = ev.repo
                    AND k.discrepancy  = ev.discrepancy
       WHERE ev.drift_type = 'commit'
+        AND ev.repo NOT LIKE 'demo_%'
       ORDER BY ex.run_date DESC, ex.run_number, ev.repo, k.drift_direction, ev.commit_date
     EOT
     use_legacy_sql = false
@@ -973,6 +979,7 @@ resource "google_bigquery_table" "file_drift_report" {
         JOIN latest_exec e USING (execution_id)
         WHERE k.drift_type = 'content'
           AND k.status     = 'ok'
+          AND k.repo NOT LIKE 'demo_%'
       ),
 
       evidence_agg AS (
@@ -991,6 +998,7 @@ resource "google_bigquery_table" "file_drift_report" {
         FROM `${var.reporting_project_id}.devops_reports.branch_drift_evidence` ev
         JOIN latest_exec USING (execution_id)
         WHERE ev.drift_type = 'content'
+          AND ev.repo NOT LIKE 'demo_%'
         GROUP BY ev.execution_id, ev.repo, ev.discrepancy
       )
 
@@ -1087,6 +1095,7 @@ resource "google_bigquery_table" "file_drift_evidence_report" {
       JOIN latest_exec e USING (execution_id)
       WHERE ev.drift_type = 'content'
         AND ev.file_path  IS NOT NULL
+        AND ev.repo NOT LIKE 'demo_%'
       ORDER BY
         e.run_date        DESC,
         e.run_number,
@@ -1157,6 +1166,7 @@ resource "google_bigquery_table" "bq_structure_drift_report" {
           ORDER BY checked_at DESC
         ) AS run_number
       FROM `${var.reporting_project_id}.devops_reports.bq_structure_drift`
+      WHERE dataset_id NOT LIKE 'demo_%'
     EOT
   }
 }
