@@ -409,10 +409,12 @@ _ALTER_TABLE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# DROP TABLE — used to exclude transient tables (created and dropped in the same file,
-# e.g. inside a stored-procedure body) from the persistent inventory.
+# DROP TABLE/VIEW — used to exclude transient objects (created and dropped in the same
+# file, e.g. inside a stored-procedure body) from the persistent inventory, and to
+# suppress only_in_source findings for objects that were intentionally retired via a
+# standalone DROP file (e.g. DROP VIEW IF EXISTS kept for historical reference).
 _DROP_TABLE_RE = re.compile(
-    r"\bdrop\s+table\s+(?:if\s+exists\s*)?`?(?:(?:[\w\-]+)`?\.`?)*(?P<obj>[\w\-]+)`?",
+    r"\bdrop\s+(?:table|view)\s+(?:if\s+exists\s*)?`?(?:(?:[\w\-]+)`?\.`?)*(?P<obj>[\w\-]+)`?",
     re.IGNORECASE,
 )
 
@@ -607,8 +609,8 @@ def build_source_bq_inventory(snapshot_dir: Path) -> tuple[dict[str, SourceBqObj
         alter_match = _ALTER_TABLE_RE.search(sql)
 
         # Skip pure DML / MERGE / script files — no DDL of any kind.
-        # Exception: a file with only DROP TABLE permanently removes the object from
-        # inventory (e.g. cell_slice_resource_v1.sql intentionally retiring a table).
+        # Exception: a file with only DROP TABLE/VIEW permanently removes the object from
+        # inventory (e.g. a standalone DROP VIEW kept for historical reference).
         if not targets and not alter_match:
             for _drop_m in _DROP_TABLE_RE.finditer(sql):
                 _drop_obj = _drop_m.group("obj")
